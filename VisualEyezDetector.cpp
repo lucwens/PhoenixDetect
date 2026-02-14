@@ -39,7 +39,7 @@ std::string BytesToString(const std::vector<unsigned char>& bytes) {
     return str;
 }
 
-bool CheckPort(int portNum) {
+HANDLE CheckPort(int portNum) {
     std::string portName = "\\\\.\\COM" + std::to_string(portNum);
 
     HANDLE hSerial = CreateFileA(
@@ -54,7 +54,7 @@ bool CheckPort(int portNum) {
 
     if (hSerial == INVALID_HANDLE_VALUE) {
         // Port cannot be opened (doesn't exist or in use)
-        return false;
+        return INVALID_HANDLE_VALUE;
     }
 
     std::cout << "Checking " << portName << "..." << std::endl;
@@ -65,7 +65,7 @@ bool CheckPort(int portNum) {
     if (!GetCommState(hSerial, &dcbSerialParams)) {
         std::cerr << "  Error getting state for " << portName << std::endl;
         CloseHandle(hSerial);
-        return false;
+        return INVALID_HANDLE_VALUE;
     }
 
     dcbSerialParams.BaudRate = TARGET_BAUDRATE;
@@ -78,7 +78,7 @@ bool CheckPort(int portNum) {
     if (!SetCommState(hSerial, &dcbSerialParams)) {
         std::cerr << "  Error setting state for " << portName << ". Baud rate " << TARGET_BAUDRATE << " might not be supported." << std::endl;
         CloseHandle(hSerial);
-        return false;
+        return INVALID_HANDLE_VALUE;
     }
 
     COMMTIMEOUTS timeouts = { 0 };
@@ -92,7 +92,7 @@ bool CheckPort(int portNum) {
     if (!SetCommTimeouts(hSerial, &timeouts)) {
         std::cerr << "  Error setting timeouts for " << portName << std::endl;
         CloseHandle(hSerial);
-        return false;
+        return INVALID_HANDLE_VALUE;
     }
 
     // Purge buffers to ensure we read fresh data
@@ -130,8 +130,7 @@ bool CheckPort(int portNum) {
                         std::cout << "Serial Number (ASCII): " << BytesToString(serialBytes) << std::endl;
                         std::cout << "******************************************\n" << std::endl;
 
-                        CloseHandle(hSerial);
-                        return true;
+                        return hSerial;
                     }
                 }
             }
@@ -143,7 +142,56 @@ bool CheckPort(int portNum) {
     // If required, we could send "&?100\r" here.
 
     CloseHandle(hSerial);
-    return false;
+    return INVALID_HANDLE_VALUE;
+}
+
+bool PingDevice(HANDLE hSerial) {
+    // Command: &7000\r (Ping)
+    // Hex: 26 37 30 30 30 0D
+    std::string command = "&7000\r";
+    DWORD bytesWritten;
+
+    std::cout << "Sending Ping command (&70)..." << std::endl;
+
+    if (!WriteFile(hSerial, command.c_str(), (DWORD)command.length(), &bytesWritten, NULL)) {
+        std::cerr << "Error writing ping command." << std::endl;
+        return false;
+    }
+
+    // Wait for response
+    std::vector<unsigned char> buffer(256);
+    DWORD bytesRead;
+
+    // Give it some time to respond
+    Sleep(200);
+
+    if (ReadFile(hSerial, buffer.data(), (DWORD)buffer.size(), &bytesRead, NULL)) {
+        if (bytesRead > 0) {
+            // Trim buffer to actual read size
+            buffer.resize(bytesRead);
+            std::cout << "Received response (" << bytesRead << " bytes):" << std::endl;
+            std::cout << "Hex: " << BytesToHex(buffer) << std::endl;
+            std::cout << "ASCII: " << BytesToString(buffer) << std::endl;
+
+            // Check for expected response pattern
+            // Expected: 37 30 ('7' '0') or ACK
+            // If the buffer starts with '7' '0' (0x37 0x30), it is an echo/ack of the ping.
+            if (bytesRead >= 2 && buffer[0] == 0x37 && buffer[1] == 0x30) {
+                std::cout << "Ping Acknowledged!" << std::endl;
+                return true;
+            } else {
+                std::cout << "Response does not match standard ACK (70...)." << std::endl;
+                // Note: driver.json showed 00000... response, so this might happen.
+                return false;
+            }
+        } else {
+            std::cout << "No response received." << std::endl;
+            return false;
+        }
+    } else {
+        std::cerr << "Error reading response." << std::endl;
+        return false;
+    }
 }
 
 int main() {
@@ -154,11 +202,15 @@ int main() {
     bool found = false;
     // Scan typical range of COM ports
     for (int i = 1; i <= 32; ++i) {
-        if (CheckPort(i)) {
+        HANDLE hDevice = CheckPort(i);
+        if (hDevice != INVALID_HANDLE_VALUE) {
             found = true;
-            // Stop after finding one? Or keep scanning?
-            // Usually we stop unless looking for multiple.
-            // Let's break for this console tool.
+
+            // Test communication with Ping
+            PingDevice(hDevice);
+
+            CloseHandle(hDevice);
+            // Stop after finding one
             break;
         }
     }
