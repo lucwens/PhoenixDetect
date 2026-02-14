@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "sourceFile": "D:\\PTIConvert\\Data\\detect.dmslog8",
+    "sessionTimestamp": "2026-02-14T13:05:33.033940Z",
+    "device": "[[[s:120:[[[b[[[uSerial Port Properties]]]]]]]]]\n\n[[[bMax. TX Queue]]]\tnone\n[[[bMax. RX Queue]]]\tnone\n[[[bMax. Baud Rate]]]\tconfigurable\n[[[bProvider]]]\tRS232\n[[[bCapabilities]]]\tDTR/DSR, RTS/CTS, RLSD (DCD), Parity Check, XON/XOFF, Settable XON/XOFF, Total time-outs, Interval time-outs\n[[[bSettable Parameters]]]\tParity, Baud, Data Bits, Stop Bits, Handshaking, Parity Check, RLSD (DCD)\n[[[bBaud Rates]]]\t75, 110, 134.5, 150, 300, 600, 1200, 1800, 2400, 4800, 7200, 9600, 14400, 19200, 38400, 56K, 128K, 115200, configurable\n[[[bData Bits]]]\t5, 6, 7, 8\n[[[bStop Bits]]]\t1, 1.5, 2\n[[[bParity]]]\tNone, Odd, Even, Mark, Space\n[[[bCurrent Tx Queue]]]\tunavailable\n[[[bCurrent Rx Queue]]]\t130,944 bytes\n\n",
+    "portConfig": "2,500,000, data bits: 8, stop bits: 1, parity: None",
+    "protocol": "Phoenix Visualeyez VZK10 RS-422"
+  },
+  "summary": {
+    "totalFrames": 2,
+    "commands": 1,
+    "dataSets": 0,
+    "messages": 0,
+    "initMessages": 1,
+    "unknownFrames": 0
+  },
+  "frames": [
+    {
+      "index": 0,
+      "timestamp": "2026-02-14T13:09:17.409371Z",
+      "direction": "RX",
+      "type": "initMessage",
+      "initMessage": {
+        "serialNumber": "5152535455565758",
+        "status": 1,
+        "initialized": true
+      },
+      "rawHex": "0102030451525354555657580d0e0110111213"
+    },
+    {
+      "index": 1,
+      "timestamp": "2026-02-14T13:09:17.409374Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "?",
+        "index": "1",
+        "name": "Query/Identify",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&?1 (Query/Identify)"
+      },
+      "rawHex": "263f3130300d"
+    }
+  ]
+}

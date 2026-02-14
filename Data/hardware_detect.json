@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "sourceFile": "D:\\PTIConvert\\Data\\hardware_detect.dmslog8",
+    "sessionTimestamp": "2026-02-09T13:20:55.036087Z",
+    "device": "PCI Express UART Port(COM9)",
+    "portConfig": "2,500,000, data bits: 8, stop bits: 1, parity: None",
+    "protocol": "Phoenix Visualeyez VZK10 RS-422"
+  },
+  "summary": {
+    "totalFrames": 2,
+    "commands": 1,
+    "dataSets": 0,
+    "messages": 0,
+    "initMessages": 1,
+    "unknownFrames": 0
+  },
+  "frames": [
+    {
+      "index": 0,
+      "timestamp": "2026-02-09T13:21:33.799589Z",
+      "direction": "RX",
+      "type": "initMessage",
+      "initMessage": {
+        "serialNumber": "5152535455565758",
+        "status": 1,
+        "initialized": true
+      },
+      "rawHex": "0102030451525354555657580d0e0110111213"
+    },
+    {
+      "index": 1,
+      "timestamp": "2026-02-09T13:21:33.799591Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "?",
+        "index": "1",
+        "name": "Query/Identify",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&?1 (Query/Identify)"
+      },
+      "rawHex": "263f3130300d"
+    }
+  ]
+}

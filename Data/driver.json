@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "sourceFile": "D:\\PTIConvert\\Data\\driver.dmslog8",
+    "sessionTimestamp": "2026-02-14T16:20:44.909053Z",
+    "device": "[[[s:120:[[[b[[[uSerial Port Properties]]]]]]]]]\n\n[[[bMax. TX Queue]]]\tnone\n[[[bMax. RX Queue]]]\tnone\n[[[bMax. Baud Rate]]]\tconfigurable\n[[[bProvider]]]\tRS232\n[[[bCapabilities]]]\tDTR/DSR, RTS/CTS, RLSD (DCD), Parity Check, XON/XOFF, Settable XON/XOFF, Total time-outs, Interval time-outs\n[[[bSettable Parameters]]]\tParity, Baud, Data Bits, Stop Bits, Handshaking, Parity Check, RLSD (DCD)\n[[[bBaud Rates]]]\t75, 110, 134.5, 150, 300, 600, 1200, 1800, 2400, 4800, 7200, 9600, 14400, 19200, 38400, 56K, 128K, 115200, configurable\n[[[bData Bits]]]\t5, 6, 7, 8\n[[[bStop Bits]]]\t1, 1.5, 2\n[[[bParity]]]\tNone, Odd, Even, Mark, Space\n[[[bCurrent Tx Queue]]]\tunavailable\n[[[bCurrent Rx Queue]]]\t130,944 bytes\n\n",
+    "portConfig": "2,500,000, data bits: 8, stop bits: 1, parity: None",
+    "protocol": "Phoenix Visualeyez VZK10 RS-422"
+  },
+  "summary": {
+    "totalFrames": 10,
+    "commands": 4,
+    "dataSets": 0,
+    "messages": 0,
+    "initMessages": 0,
+    "unknownFrames": 6
+  },
+  "frames": [
+    {
+      "index": 0,
+      "timestamp": "2026-02-14T16:30:39.261432Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "0132d0c0048d8b4ad6b4adc929294c19f250802009c842c6"
+    },
+    {
+      "index": 1,
+      "timestamp": "2026-02-14T16:30:40.528663Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "`",
+        "index": "0",
+        "name": "Software Reset",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&`0 (Software Reset)"
+      },
+      "rawHex": "26603030300d"
+    },
+    {
+      "index": 2,
+      "timestamp": "2026-02-14T16:30:40.600861Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "000000000000000000000000000008021ff80080000000000000000000000000000008021ff800c0"
+    },
+    {
+      "index": 3,
+      "timestamp": "2026-02-14T16:30:45.566605Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "7",
+        "index": "0",
+        "name": "Ping",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&70 (Ping)"
+      },
+      "rawHex": "26373030300d"
+    },
+    {
+      "index": 4,
+      "timestamp": "2026-02-14T16:30:45.636914Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "000000000000000000000000000008021ff800c0000000000000000000000000000008021ff800c0"
+    },
+    {
+      "index": 5,
+      "timestamp": "2026-02-14T16:33:16.188813Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "0132d0c0048dc94ad6b4ad8b2b294c1bf2508020098842c4"
+    },
+    {
+      "index": 6,
+      "timestamp": "2026-02-14T16:33:17.459457Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "`",
+        "index": "0",
+        "name": "Software Reset",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&`0 (Software Reset)"
+      },
+      "rawHex": "26603030300d"
+    },
+    {
+      "index": 7,
+      "timestamp": "2026-02-14T16:33:17.532932Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "000000000000000000000000000008021ff80080000000000000000000000000000008021ff800c0"
+    },
+    {
+      "index": 8,
+      "timestamp": "2026-02-14T16:33:22.501803Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "7",
+        "index": "0",
+        "name": "Ping",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&70 (Ping)"
+      },
+      "rawHex": "26373030300d"
+    },
+    {
+      "index": 9,
+      "timestamp": "2026-02-14T16:33:22.572482Z",
+      "direction": "RX",
+      "type": "unknown",
+      "rawHex": "000000000000000000000000000008021ff800c0000000000000000000000000000008021ff800c0"
+    }
+  ]
+}
