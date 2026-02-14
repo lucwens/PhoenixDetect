@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="PhoenixDetect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
+</Solution>
