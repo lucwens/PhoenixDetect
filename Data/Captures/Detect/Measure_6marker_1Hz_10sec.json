@@ -1,0 +1,71 @@
+{
+  "metadata": {
+    "sourceFile": "D:\\Phoenix\\Data\\Captures\\Detect\\Measure_6marker_1Hz_10sec.dmslog8",
+    "sessionTimestamp": "2026-02-16T17:35:44.753466Z",
+    "device": "PCI Express UART Port(COM9)",
+    "portConfig": "2,000,000, data bits: 8, stop bits: 1, parity: None",
+    "protocol": "Phoenix Visualeyez VZK10 RS-422"
+  },
+  "summary": {
+    "totalFrames": 2,
+    "commands": 1,
+    "dataSets": 1,
+    "messages": 0,
+    "initMessages": 0,
+    "unknownFrames": 0
+  },
+  "frames": [
+    {
+      "index": 0,
+      "timestamp": "2026-02-16T17:35:50.286564Z",
+      "direction": "TX",
+      "type": "command",
+      "command": {
+        "code": "`",
+        "index": "0",
+        "name": "Software Reset",
+        "bytesPerParam": 0,
+        "numParams": 0,
+        "description": "&`0 (Software Reset)"
+      },
+      "rawHex": "26603030300d"
+    },
+    {
+      "index": 1,
+      "timestamp": "2026-02-16T17:35:53.019396Z",
+      "direction": "RX",
+      "type": "dataSet",
+      "dataSet": {
+        "timestamp_us": 0,
+        "x_mm": -0.01,
+        "y_mm": 16770.56,
+        "z_mm": -0.01,
+        "ledId": 0,
+        "tcmId": 0,
+        "endOfFrame": false,
+        "status": {
+          "raw": "0x00e00000",
+          "coordStatus": 0,
+          "ambientLight": 0,
+          "triggerIndex": 0,
+          "rightEye": {
+            "signalLow": false,
+            "status": 0,
+            "description": "No anomaly"
+          },
+          "centerEye": {
+            "signalLow": false,
+            "status": 0,
+            "description": "No anomaly"
+          },
+          "leftEye": {
+            "signalLow": false,
+            "status": 0,
+            "description": "No anomaly"
+          }
+        }
+      },
+      "rawHex": "00000000ffffff199700ffffff00e0000080e0"
+    }
+  ]
+}

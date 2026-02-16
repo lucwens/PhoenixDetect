@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
     if (fs::is_directory(inputPath))
     {
         // Convert all .dmslog8 files in the directory
-        for (const auto &entry : fs::directory_iterator(inputPath))
+        for (const auto &entry : fs::recursive_directory_iterator(inputPath))
         {
             if (entry.is_regular_file())
             {

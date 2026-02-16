@@ -1,5 +1,8 @@
 #include "Detect_HHD.h"
 #include "Measure_HHD.h"
+#include "DmsLogReader.h"
+#include "PhoenixDecoder.h"
+#include "JsonWriter.h"
 
 #include <windows.h>
 #include <iostream>
@@ -10,6 +13,7 @@
 #include <cctype>
 #include <conio.h>
 #include <fstream>
+#include <filesystem>
 
 // VisualEyez Configuration
 // Based on logs: 2,500,000 baud, 8 data bits, 1 stop bit, No parity.
@@ -222,12 +226,111 @@ bool PingDevice(HANDLE hSerial)
     }
 }
 
-int main()
+namespace fs = std::filesystem;
+
+static bool convertFile(const std::string &inputPath, const std::string &outputPath)
 {
+    std::cout << "Converting: " << inputPath << "\n";
+
+    DmsLogReader reader;
+    if (!reader.open(inputPath))
+        return false;
+
+    const auto &hdr = reader.header();
+    std::cout << "  Device: " << hdr.deviceName << "\n";
+    if (!hdr.portConfig.empty())
+        std::cout << "  Port:   " << hdr.portConfig << "\n";
+
+    std::vector<IrpRecord> records;
+    if (!reader.readRecords(records))
+    {
+        std::cerr << "  Error: no serial data records found\n";
+        return false;
+    }
+
+    std::vector<std::pair<uint64_t, std::vector<uint8_t>>> txRecords, rxRecords;
+    for (const auto &rec : records)
+    {
+        auto entry = std::make_pair(rec.timestamp, rec.serialData);
+        if (rec.functionCode == 4 && !rec.isCompletion)
+            txRecords.push_back(std::move(entry));
+        else
+            rxRecords.push_back(std::move(entry));
+    }
+
+    std::cout << "  TX packets: " << txRecords.size() << "\n";
+    std::cout << "  RX packets: " << rxRecords.size() << "\n";
+
+    PhoenixDecoder            decoder;
+    std::vector<PhoenixFrame> frames;
+    decoder.decode(txRecords, rxRecords, frames);
+
+    std::cout << "  Decoded frames: " << frames.size() << "\n";
+
+    JsonWriter writer;
+    if (!writer.write(outputPath, hdr, inputPath, frames))
+        return false;
+
+    std::cout << "  Output: " << outputPath << "\n";
+    return true;
+}
+
+static int convertDirectory(const std::string &dirPath)
+{
+    fs::path dir(dirPath);
+    if (!fs::is_directory(dir))
+    {
+        std::cerr << "Error: not a directory: " << dirPath << "\n";
+        return 1;
+    }
+
+    std::vector<std::pair<std::string, std::string>> filesToConvert;
+    for (const auto &entry : fs::recursive_directory_iterator(dir))
+    {
+        if (!entry.is_regular_file())
+            continue;
+        std::string ext = entry.path().extension().string();
+        if (ext.find(".dmslog") == 0)
+        {
+            std::string outPath = entry.path().string();
+            size_t      dotPos  = outPath.rfind(".dmslog");
+            if (dotPos != std::string::npos)
+                outPath = outPath.substr(0, dotPos) + ".json";
+            else
+                outPath += ".json";
+            filesToConvert.emplace_back(entry.path().string(), outPath);
+        }
+    }
+
+    if (filesToConvert.empty())
+    {
+        std::cerr << "No .dmslog files found in: " << dirPath << "\n";
+        return 1;
+    }
+
+    int successCount = 0;
+    for (const auto &[inFile, outFile] : filesToConvert)
+    {
+        if (convertFile(inFile, outFile))
+            ++successCount;
+    }
+
+    std::cout << "\nConverted " << successCount << "/" << filesToConvert.size() << " file(s).\n";
+    return (successCount == static_cast<int>(filesToConvert.size())) ? 0 : 1;
+}
+
+int main(int argc, char *argv[])
+{
+    // If a directory argument is given, convert all .dmslog8 files to JSON
+    if (argc >= 2)
+    {
+        return convertDirectory(argv[1]);
+    }
+
     std::cout << "VisualEyez Tracker Interactive Console" << std::endl;
     std::cout << "==========================================" << std::endl;
     std::cout << "  h - Detect HHD on COM1-COM16" << std::endl;
-    std::cout << "  s - Start measurement (TCM 1&2, all markers, 10 Hz)" << std::endl;
+    std::cout << "  s - Start measurement (10 Hz, auto-stops after 10s)" << std::endl;
     std::cout << "  t - Stop measurement" << std::endl;
     std::cout << "  q - Quit" << std::endl;
     std::cout << std::endl;
@@ -237,6 +340,8 @@ int main()
     std::string             detectedPort;
     DWORD                   detectedBaud   = 0;
     std::string             detectedSerial;
+    ULONGLONG               measureStartTick = 0;
+    const DWORD             MEASURE_DURATION_MS = 10000; // auto-stop after 10 seconds
 
     while (true)
     {
@@ -328,7 +433,10 @@ int main()
 
                 session = StartMeasurement(hPort, 10, markers);
                 if (session)
-                    std::cout << "Measurement started." << std::endl;
+                {
+                    measureStartTick = GetTickCount64();
+                    std::cout << "Measurement started (will auto-stop in 10s)." << std::endl;
+                }
                 else
                 {
                     std::cout << "Failed to start measurement." << std::endl;
@@ -386,6 +494,20 @@ int main()
 
                 break;
             }
+        }
+
+        // --- Auto-stop after 10 seconds ---
+        if (session && (GetTickCount64() - measureStartTick) >= MEASURE_DURATION_MS)
+        {
+            std::cout << "\n10 seconds elapsed — stopping measurement automatically." << std::endl;
+            StopMeasurement(session);
+            session = nullptr;
+            if (hPort != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(hPort);
+                hPort = INVALID_HANDLE_VALUE;
+            }
+            std::cout << "Measurement stopped." << std::endl;
         }
 
         // --- Fetch and display measurement data ---
