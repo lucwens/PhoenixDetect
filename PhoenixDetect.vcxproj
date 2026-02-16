@@ -19,7 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Detect_HHD.cpp" />
     <ClCompile Include="VisualEyezDetector.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Detect_HHD.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>

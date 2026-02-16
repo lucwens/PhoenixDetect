@@ -1,3 +1,5 @@
+#include "Detect_HHD.h"
+
 #include <windows.h>
 #include <iostream>
 #include <string>
@@ -208,31 +210,66 @@ bool PingDevice(HANDLE hSerial) {
 int main()
 {
     std::cout << "VisualEyez Tracker Detector" << std::endl;
-    std::cout << "Scanning COM ports for VisualEyez devices..." << std::endl;
-    std::cout << "Config: " << TARGET_BAUDRATE << " baud, 8N1" << std::endl;
+    std::cout << "==========================================" << std::endl;
 
     bool found = false;
-    // Scan typical range of COM ports
-    for (int i = 1; i <= 32; ++i) {
-        HANDLE hDevice = CheckPort(i);
-        if (hDevice != INVALID_HANDLE_VALUE) {
+
+    // --- Method 1: HHD detection sequence (DTR toggle + CONFIG_SIZE polling) ---
+    std::cout << "\n--- HHD Detection (DTR reset + CONFIG_SIZE polling) ---" << std::endl;
+    for (int i = 1; i <= 32; ++i)
+    {
+        std::string portName = "COM" + std::to_string(i);
+
+        // Quick check: can we open the port at all?
+        std::string portPath = "\\\\.\\" + portName;
+        HANDLE      hTest    = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hTest == INVALID_HANDLE_VALUE)
+            continue; // Port doesn't exist or is in use
+        CloseHandle(hTest);
+
+        HHD_DetectionResult result = Detect_HHD(portName);
+        if (result.deviceFound)
+        {
             found = true;
-
-            // Test communication with Ping
-            PingDevice(hDevice);
-
-            CloseHandle(hDevice);
-            // Stop after finding one
+            std::cout << "\n*** VisualEyez Tracker DETECTED via HHD method ***" << std::endl;
+            std::cout << "Port: " << result.portName << std::endl;
+            std::cout << "Baud: " << result.detectedBaudRate << std::endl;
+            if (!result.serialNumber.empty())
+                std::cout << "Serial Number: " << result.serialNumber << std::endl;
+            std::cout << "Config Size: " << result.configSize << std::endl;
+            if (!result.configData.empty())
+            {
+                std::cout << "Config Data (" << result.configData.size() << " bytes): ";
+                std::cout << BytesToHex(result.configData) << std::endl;
+            }
+            std::cout << "**************************************************\n" << std::endl;
             break;
+        }
+    }
+
+    // --- Method 2: Init-pattern scan (original method) ---
+    if (!found)
+    {
+        std::cout << "\n--- Init-Pattern Scan (" << TARGET_BAUDRATE << " baud, 8N1) ---" << std::endl;
+        for (int i = 1; i <= 32; ++i)
+        {
+            HANDLE hDevice = CheckPort(i);
+            if (hDevice != INVALID_HANDLE_VALUE)
+            {
+                found = true;
+                PingDevice(hDevice);
+                CloseHandle(hDevice);
+                break;
+            }
         }
     }
 
     if (!found)
     {
-        std::cout << "No VisualEyez Tracker detected." << std::endl;
+        std::cout << "\nNo VisualEyez Tracker detected by either method." << std::endl;
     }
 
-    std::cout << "Press Enter to exit..." << std::endl;
+    std::cout << "\nPress Enter to exit..." << std::endl;
     std::cin.get();
     return 0;
 }
