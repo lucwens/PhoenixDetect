@@ -1,0 +1,451 @@
+#include "Measure_HHD.h"
+#include <iostream>
+#include <cstring>
+
+// --------------------------------------------------------------------------
+// Internal helpers and constants
+// --------------------------------------------------------------------------
+namespace
+{
+    // Every record from the tracker is exactly 19 bytes (PTI Section 4.3)
+    const int RECORD_SIZE = 19;
+
+    // ACK response size (same as record size — PTI Section 4.4)
+    const int ACK_SIZE = 19;
+
+    // Timing defaults observed in the IRP capture
+    const uint32_t DEFAULT_SAMPLING_PERIOD_US = 115; // per-marker sampling period (μs)
+
+    // Timeouts for the command/response cycle
+    const int CMD_ACK_TIMEOUT_MS   = 500;  // max wait for ACK after a command
+    const int CMD_ACK_POLL_MS      = 1;    // poll interval while waiting for ACK
+    const int STOP_GAP_MS          = 1500; // gap between first and second stop command
+    const int FETCH_READ_TIMEOUT_MS = 5;   // short timeout for non-blocking fetch reads
+
+    // --------------------------------------------------------------------------
+    // Session structure (opaque to callers)
+    // --------------------------------------------------------------------------
+    struct SessionImpl
+    {
+        HANDLE               hPort;
+        int                  frequencyHz;
+        int                  numChannels;
+        std::vector<uint8_t> residual; // leftover bytes from partial record reads
+    };
+
+    // --------------------------------------------------------------------------
+    // Build a PTI command buffer
+    // --------------------------------------------------------------------------
+    // Format: & <code> <index> <bytesPerParam> <numParams> CR [param data]
+    std::vector<uint8_t> BuildCommand(char code, char index, char bytesPerParam, char numParams,
+                                      const uint8_t *paramData = nullptr, int paramLen = 0)
+    {
+        std::vector<uint8_t> cmd;
+        cmd.push_back(0x26); // '&'
+        cmd.push_back(static_cast<uint8_t>(code));
+        cmd.push_back(static_cast<uint8_t>(index));
+        cmd.push_back(static_cast<uint8_t>(bytesPerParam));
+        cmd.push_back(static_cast<uint8_t>(numParams));
+        cmd.push_back(0x0D); // CR
+        if (paramData && paramLen > 0)
+        {
+            cmd.insert(cmd.end(), paramData, paramData + paramLen);
+        }
+        return cmd;
+    }
+
+    // --------------------------------------------------------------------------
+    // Send a command and wait for the 19-byte ACK (Message Set)
+    // --------------------------------------------------------------------------
+    // Returns true if ACK was received and the command code echo matches.
+    // For commands that generate no ACK (e.g., &3 START), use sendOnly=true.
+    bool SendCommand(HANDLE hPort, const std::vector<uint8_t> &cmd, bool sendOnly = false)
+    {
+        // Purge RX buffer before sending (matches IRP capture pattern)
+        PurgeComm(hPort, PURGE_RXCLEAR);
+
+        DWORD bytesWritten = 0;
+        if (!WriteFile(hPort, cmd.data(), static_cast<DWORD>(cmd.size()), &bytesWritten, NULL) ||
+            bytesWritten != cmd.size())
+        {
+            std::cerr << "  [Measure] WriteFile failed (error " << GetLastError() << ")" << std::endl;
+            return false;
+        }
+
+        if (sendOnly)
+            return true;
+
+        // Poll COMMSTATUS waiting for ACK data (≥19 bytes in RX queue)
+        DWORD   errors  = 0;
+        COMSTAT comstat = {};
+        int     elapsed = 0;
+
+        while (elapsed < CMD_ACK_TIMEOUT_MS)
+        {
+            ClearCommError(hPort, &errors, &comstat);
+            if (comstat.cbInQue >= ACK_SIZE)
+                break;
+            Sleep(CMD_ACK_POLL_MS);
+            elapsed += CMD_ACK_POLL_MS;
+        }
+
+        if (comstat.cbInQue < ACK_SIZE)
+        {
+            std::cerr << "  [Measure] ACK timeout for command 0x" << std::hex << (int)cmd[1]
+                      << std::dec << " (got " << comstat.cbInQue << " bytes)" << std::endl;
+            return false;
+        }
+
+        // Read the ACK
+        uint8_t ackBuf[ACK_SIZE] = {};
+        DWORD   bytesRead        = 0;
+        if (!ReadFile(hPort, ackBuf, ACK_SIZE, &bytesRead, NULL) || bytesRead < ACK_SIZE)
+        {
+            std::cerr << "  [Measure] ReadFile ACK failed (error " << GetLastError() << ")" << std::endl;
+            return false;
+        }
+
+        // Validate: byte 0 should echo the command code
+        if (ackBuf[0] != cmd[1])
+        {
+            std::cerr << "  [Measure] ACK mismatch: expected 0x" << std::hex << (int)cmd[1]
+                      << " got 0x" << (int)ackBuf[0] << std::dec << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // Encode a uint32_t as 4 bytes, MSB first (big-endian)
+    // --------------------------------------------------------------------------
+    void EncodeBE32(uint8_t *out, uint32_t val)
+    {
+        out[0] = static_cast<uint8_t>((val >> 24) & 0xFF);
+        out[1] = static_cast<uint8_t>((val >> 16) & 0xFF);
+        out[2] = static_cast<uint8_t>((val >> 8) & 0xFF);
+        out[3] = static_cast<uint8_t>(val & 0xFF);
+    }
+
+    // --------------------------------------------------------------------------
+    // Decode a big-endian unsigned 32-bit value
+    // --------------------------------------------------------------------------
+    uint32_t DecodeBE32(const uint8_t *buf)
+    {
+        return (static_cast<uint32_t>(buf[0]) << 24) |
+               (static_cast<uint32_t>(buf[1]) << 16) |
+               (static_cast<uint32_t>(buf[2]) << 8) |
+               static_cast<uint32_t>(buf[3]);
+    }
+
+    // --------------------------------------------------------------------------
+    // Decode a big-endian signed 24-bit value (sign-extended to int32_t)
+    // --------------------------------------------------------------------------
+    int32_t DecodeBE24Signed(const uint8_t *buf)
+    {
+        int32_t val = (static_cast<int32_t>(buf[0]) << 16) |
+                      (static_cast<int32_t>(buf[1]) << 8) |
+                      static_cast<int32_t>(buf[2]);
+        if (val & 0x800000)
+            val |= static_cast<int32_t>(0xFF000000); // sign-extend
+        return val;
+    }
+
+    // --------------------------------------------------------------------------
+    // Parse a single 19-byte record into a measurement sample
+    // --------------------------------------------------------------------------
+    HHD_MeasurementSample ParseRecord(const uint8_t *rec)
+    {
+        HHD_MeasurementSample s = {};
+        s.timestamp_us = DecodeBE32(&rec[0]);                     // bytes 1-4
+        s.x_mm         = DecodeBE24Signed(&rec[4]) / 100.0;      // bytes 5-7
+        s.y_mm         = DecodeBE24Signed(&rec[7]) / 100.0;      // bytes 8-10
+        s.z_mm         = DecodeBE24Signed(&rec[10]) / 100.0;     // bytes 11-13
+        s.status       = DecodeBE32(&rec[13]);                    // bytes 14-17
+        s.ledId        = rec[17] & 0x7F;                          // byte 18, bits 6-0
+        s.tcmId        = rec[18] & 0x0F;                          // byte 19, bits 3-0
+        return s;
+    }
+
+} // anonymous namespace
+
+// --------------------------------------------------------------------------
+// HHD_MeasurementSession definition (must be after anonymous namespace)
+// --------------------------------------------------------------------------
+struct HHD_MeasurementSession
+{
+    HANDLE               hPort;
+    int                  frequencyHz;
+    int                  numChannels;
+    std::vector<uint8_t> residual;
+};
+
+// --------------------------------------------------------------------------
+// Public API
+// --------------------------------------------------------------------------
+
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numChannels)
+{
+    // Clamp parameters to valid ranges
+    if (frequencyHz < 1)
+        frequencyHz = 1;
+    if (frequencyHz > 4600)
+        frequencyHz = 4600;
+    if (numChannels < 1)
+        numChannels = 1;
+    if (numChannels > 16)
+        numChannels = 16;
+
+    std::cout << "[Measure] Starting measurement: " << frequencyHz << " Hz, "
+              << numChannels << " channels" << std::endl;
+
+    // Set timeouts for command/response phase
+    COMMTIMEOUTS timeouts               = {};
+    timeouts.ReadIntervalTimeout         = 50;
+    timeouts.ReadTotalTimeoutConstant    = CMD_ACK_TIMEOUT_MS;
+    timeouts.ReadTotalTimeoutMultiplier  = 10;
+    timeouts.WriteTotalTimeoutConstant   = 50;
+    timeouts.WriteTotalTimeoutMultiplier = 10;
+    SetCommTimeouts(hPort, &timeouts);
+
+    // Purge all buffers for clean state
+    PurgeComm(hPort, PURGE_RXCLEAR | PURGE_TXCLEAR);
+
+    // --- Configuration sequence (replicating IRP capture) ---
+
+    // 1. Status/version query: &` 000
+    std::cout << "  [Measure] Sending status query (&`)" << std::endl;
+    auto cmdStatus = BuildCommand('`', '0', '0', '0');
+    if (!SendCommand(hPort, cmdStatus))
+    {
+        std::cerr << "  [Measure] Status query failed" << std::endl;
+        return nullptr;
+    }
+
+    // 2. Set timing: &v 042 + [sampling_period(4)] + [intermission(4)]
+    uint32_t samplingPeriod_us  = DEFAULT_SAMPLING_PERIOD_US;
+    uint32_t framePeriod_us     = 1000000 / static_cast<uint32_t>(frequencyHz);
+    uint32_t channelTime_us     = static_cast<uint32_t>(numChannels) * samplingPeriod_us;
+    uint32_t intermission_us    = (framePeriod_us > channelTime_us) ? (framePeriod_us - channelTime_us) : 0;
+
+    uint8_t timingParams[8];
+    EncodeBE32(&timingParams[0], samplingPeriod_us);
+    EncodeBE32(&timingParams[4], intermission_us);
+
+    std::cout << "  [Measure] Setting timing: period=" << samplingPeriod_us
+              << "us, intermission=" << intermission_us << "us" << std::endl;
+    auto cmdTiming = BuildCommand('v', '0', '4', '2', timingParams, 8);
+    if (!SendCommand(hPort, cmdTiming))
+        return nullptr;
+
+    // 3. Signal Quality (SQR): &L 011 + 0x02
+    uint8_t sqrParam = 0x02;
+    auto cmdSQR = BuildCommand('L', '0', '1', '1', &sqrParam, 1);
+    if (!SendCommand(hPort, cmdSQR))
+        return nullptr;
+
+    // 4. Min Signal (MSR): &O 021 + 0x00 0x02
+    uint8_t msrParams[] = {0x00, 0x02};
+    auto cmdMSR = BuildCommand('O', '0', '2', '1', msrParams, 2);
+    if (!SendCommand(hPort, cmdMSR))
+        return nullptr;
+
+    // 5. Exposure Gain: &Y A11 + 0x08
+    uint8_t gainParam = 0x08;
+    auto cmdGain = BuildCommand('Y', 'A', '1', '1', &gainParam, 1);
+    if (!SendCommand(hPort, cmdGain))
+        return nullptr;
+
+    // 6. SOT Limit: &U 011 + 0x03
+    uint8_t sotParam = 0x03;
+    auto cmdSOT = BuildCommand('U', '0', '1', '1', &sotParam, 1);
+    if (!SendCommand(hPort, cmdSOT))
+        return nullptr;
+
+    // 7. Tether Mode: &^ 011 + 0x0D
+    uint8_t tetherParam = 0x0D;
+    auto cmdTether = BuildCommand('^', '0', '1', '1', &tetherParam, 1);
+    if (!SendCommand(hPort, cmdTether))
+        return nullptr;
+
+    // 8. Single Sampling: &Q A00
+    auto cmdSingleSamp = BuildCommand('Q', 'A', '0', '0');
+    if (!SendCommand(hPort, cmdSingleSamp))
+        return nullptr;
+
+    // 9. Clear TFS: &p 000
+    std::cout << "  [Measure] Programming TFS (" << numChannels << " channels)" << std::endl;
+    auto cmdClearTFS = BuildCommand('p', '0', '0', '0');
+    if (!SendCommand(hPort, cmdClearTFS))
+        return nullptr;
+
+    // 10. Append channels to TFS: &p 112 + {channel_id} {01} for each channel
+    for (int ch = 1; ch <= numChannels; ch++)
+    {
+        uint8_t tfsParams[] = {static_cast<uint8_t>(ch), 0x01}; // LEDID=ch, #flash=1
+        auto cmdAppendTFS = BuildCommand('p', '1', '1', '2', tfsParams, 2);
+        if (!SendCommand(hPort, cmdAppendTFS))
+            return nullptr;
+    }
+
+    // 11. Sync EOF: &o 000
+    auto cmdSyncEOF = BuildCommand('o', '0', '0', '0');
+    if (!SendCommand(hPort, cmdSyncEOF))
+        return nullptr;
+
+    // 12. Multi-Rate Sampling SM0: &X 018 + 8 zero bytes
+    uint8_t multiRateParams[8] = {};
+    auto cmdMultiRate = BuildCommand('X', '0', '1', '8', multiRateParams, 8);
+    if (!SendCommand(hPort, cmdMultiRate))
+        return nullptr;
+
+    // 13. Upload TFS: &r 000
+    auto cmdUploadTFS = BuildCommand('r', '0', '0', '0');
+    if (!SendCommand(hPort, cmdUploadTFS))
+        return nullptr;
+
+    // 14. Refraction OFF: &: 000
+    auto cmdRefraction = BuildCommand(':', '0', '0', '0');
+    if (!SendCommand(hPort, cmdRefraction))
+        return nullptr;
+
+    // 15. Internal Trigger: &S 000
+    auto cmdTrigger = BuildCommand('S', '0', '0', '0');
+    if (!SendCommand(hPort, cmdTrigger))
+        return nullptr;
+
+    // --- Switch to short read timeouts for streaming ---
+    timeouts.ReadIntervalTimeout        = 1;
+    timeouts.ReadTotalTimeoutConstant   = FETCH_READ_TIMEOUT_MS;
+    timeouts.ReadTotalTimeoutMultiplier = 0;
+    SetCommTimeouts(hPort, &timeouts);
+
+    // --- START: &3 000 (no ACK generated) ---
+    std::cout << "  [Measure] Sending START (&3)" << std::endl;
+    auto cmdStart = BuildCommand('3', '0', '0', '0');
+    if (!SendCommand(hPort, cmdStart, /*sendOnly=*/true))
+        return nullptr;
+
+    std::cout << "[Measure] Measurement started" << std::endl;
+
+    // Allocate session
+    HHD_MeasurementSession *session = new HHD_MeasurementSession();
+    session->hPort                  = hPort;
+    session->frequencyHz            = frequencyHz;
+    session->numChannels            = numChannels;
+    return session;
+}
+
+int FetchMeasurements(HHD_MeasurementSession *session, std::vector<HHD_MeasurementSample> &samples)
+{
+    if (!session)
+        return 0;
+
+    // Check how many bytes are available in the RX queue
+    DWORD   errors  = 0;
+    COMSTAT comstat = {};
+    ClearCommError(session->hPort, &errors, &comstat);
+
+    if (comstat.cbInQue == 0 && session->residual.empty())
+        return 0; // nothing to read
+
+    // Read all available bytes
+    int newSamples = 0;
+
+    if (comstat.cbInQue > 0)
+    {
+        std::vector<uint8_t> readBuf(comstat.cbInQue);
+        DWORD                bytesRead = 0;
+
+        if (!ReadFile(session->hPort, readBuf.data(), static_cast<DWORD>(readBuf.size()), &bytesRead, NULL))
+            return 0;
+
+        readBuf.resize(bytesRead);
+
+        // Prepend any residual bytes from the previous call
+        if (!session->residual.empty())
+        {
+            session->residual.insert(session->residual.end(), readBuf.begin(), readBuf.end());
+            readBuf.swap(session->residual);
+            session->residual.clear();
+        }
+
+        // Parse complete 19-byte records
+        size_t offset = 0;
+        while (offset + RECORD_SIZE <= readBuf.size())
+        {
+            samples.push_back(ParseRecord(&readBuf[offset]));
+            newSamples++;
+            offset += RECORD_SIZE;
+        }
+
+        // Save any trailing partial record for the next call
+        if (offset < readBuf.size())
+        {
+            session->residual.assign(readBuf.begin() + offset, readBuf.end());
+        }
+    }
+    else if (!session->residual.empty())
+    {
+        // Only residual data, no new bytes — check if we have a complete record
+        if (session->residual.size() >= RECORD_SIZE)
+        {
+            size_t offset = 0;
+            while (offset + RECORD_SIZE <= session->residual.size())
+            {
+                samples.push_back(ParseRecord(&session->residual[offset]));
+                newSamples++;
+                offset += RECORD_SIZE;
+            }
+            if (offset < session->residual.size())
+            {
+                session->residual.erase(session->residual.begin(),
+                                        session->residual.begin() + offset);
+            }
+            else
+            {
+                session->residual.clear();
+            }
+        }
+    }
+
+    return newSamples;
+}
+
+bool StopMeasurement(HHD_MeasurementSession *session)
+{
+    if (!session)
+        return false;
+
+    std::cout << "[Measure] Stopping measurement" << std::endl;
+
+    // Restore longer timeouts for stop command ACK
+    COMMTIMEOUTS timeouts               = {};
+    timeouts.ReadIntervalTimeout         = 50;
+    timeouts.ReadTotalTimeoutConstant    = CMD_ACK_TIMEOUT_MS;
+    timeouts.ReadTotalTimeoutMultiplier  = 10;
+    timeouts.WriteTotalTimeoutConstant   = 50;
+    timeouts.WriteTotalTimeoutMultiplier = 10;
+    SetCommTimeouts(session->hPort, &timeouts);
+
+    // Send STOP twice with a gap (matches IRP capture pattern)
+    auto cmdStop = BuildCommand('5', '0', '0', '0');
+
+    std::cout << "  [Measure] Sending STOP (&5) — attempt 1" << std::endl;
+    bool ack1 = SendCommand(session->hPort, cmdStop);
+
+    Sleep(STOP_GAP_MS);
+
+    std::cout << "  [Measure] Sending STOP (&5) — attempt 2" << std::endl;
+    bool ack2 = SendCommand(session->hPort, cmdStop);
+
+    // Drain any remaining measurement data from the RX buffer
+    PurgeComm(session->hPort, PURGE_RXCLEAR);
+
+    std::cout << "[Measure] Measurement stopped" << std::endl;
+
+    // Free session
+    delete session;
+
+    return ack1 || ack2;
+}
