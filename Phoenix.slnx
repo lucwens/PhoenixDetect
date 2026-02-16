@@ -12,5 +12,6 @@
     <File Path="Doc/runloop.md" />
     <File Path="Doc/VZDaq_Manual_V200.pdf" />
   </Folder>
+  <Project Path="ConvertToJson/ConvertToJson.vcxproj" Id="b2e391d7-f46f-4024-9186-3f401a7936ea" />
   <Project Path="Detect/Detect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
 </Solution>
