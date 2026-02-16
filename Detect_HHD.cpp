@@ -4,49 +4,46 @@
 #include <sstream>
 
 // --------------------------------------------------------------------------
-// Configuration for each baud-rate detection pass
-// --------------------------------------------------------------------------
-struct BaudRatePass
-{
-    DWORD baudRate;
-    WORD  xonLimit1; // XonLimit for first handshake configuration
-    WORD  xonLimit2; // XonLimit for repeated handshake configuration
-};
-
-// Baud rates and XonLimit values from the IRP capture.
-// Pass 1 tries 2 Mbaud with XonLimit 14/22.
-// Pass 2 tries 2.5 Mbaud with XonLimit 74/82.
-static const BaudRatePass g_DetectionPasses[] = {
-    {2000000, 14, 22}, // Pass 1: 2 Mbaud
-    {2500000, 74, 82}, // Pass 2: 2.5 Mbaud
-};
-
-static const int CONFIG_SIZE_MAX_RETRIES     = 14;
-static const int CONFIG_SIZE_POLL_INTERVAL_MS = 110;
-static const int DTR_TOGGLE_DELAY_MS          = 10;
-static const int DTR_SETTLE_DELAY_MS          = 190;
-
-// PTI Initial Message Set (Section 4.5, page 20):
-//   19 bytes total, sent by tracker after hardware reset.
-//   Bytes 1-4:   01 02 03 04 (header)
-//   Bytes 5-12:  Tracker Serial Number (8 bytes, MSB first)
-//   Bytes 13-14: Reserved
-//   Byte 15:     01 (Initialized)
-//   Bytes 16-19: 10 11 12 13 (trailer)
-static const int           INIT_MSG_SIZE        = 19;
-static const int           INIT_SERIAL_OFFSET   = 4;   // serial number starts at byte 5 (0-indexed: 4)
-static const int           INIT_SERIAL_LENGTH   = 8;
-static const unsigned char INIT_HEADER[]        = {0x01, 0x02, 0x03, 0x04};
-static const int           INIT_HEADER_SIZE     = sizeof(INIT_HEADER);
-static const unsigned char INIT_STATUS_BYTE     = 0x01; // byte 15: "Initialized"
-static const unsigned char INIT_TRAILER[]       = {0x10, 0x11, 0x12, 0x13};
-static const int           INIT_MSG_READ_TIMEOUT_MS = 2500; // time to wait for init message after reset
-
-// --------------------------------------------------------------------------
-// Internal helpers
+// Internal helpers and constants
 // --------------------------------------------------------------------------
 namespace
 {
+    // Configuration for each baud-rate detection pass
+    struct BaudRatePass
+    {
+        DWORD baudRate;
+        WORD  xonLimit1; // XonLimit for first handshake configuration
+        WORD  xonLimit2; // XonLimit for repeated handshake configuration
+    };
+
+    // Baud rates and XonLimit values from the IRP capture.
+    // Pass 1 tries 2 Mbaud with XonLimit 14/22.
+    // Pass 2 tries 2.5 Mbaud with XonLimit 74/82.
+    const BaudRatePass g_DetectionPasses[] = {
+        {2000000, 14, 22}, // Pass 1: 2 Mbaud
+        {2500000, 74, 82}, // Pass 2: 2.5 Mbaud
+    };
+
+    const int CONFIG_SIZE_MAX_RETRIES      = 14;
+    const int CONFIG_SIZE_POLL_INTERVAL_MS = 110;
+    const int DTR_TOGGLE_DELAY_MS          = 10;
+    const int DTR_SETTLE_DELAY_MS          = 190;
+
+    // PTI Initial Message Set (Section 4.5, page 20):
+    //   19 bytes total, sent by tracker after hardware reset.
+    //   Bytes 1-4:   01 02 03 04 (header)
+    //   Bytes 5-12:  Tracker Serial Number (8 bytes, MSB first)
+    //   Bytes 13-14: Reserved
+    //   Byte 15:     01 (Initialized)
+    //   Bytes 16-19: 10 11 12 13 (trailer)
+    const int           INIT_MSG_SIZE            = 19;
+    const int           INIT_SERIAL_OFFSET       = 4; // serial number starts at byte 5 (0-indexed: 4)
+    const int           INIT_SERIAL_LENGTH       = 8;
+    const unsigned char INIT_HEADER[]            = {0x01, 0x02, 0x03, 0x04};
+    const int           INIT_HEADER_SIZE         = sizeof(INIT_HEADER);
+    const unsigned char INIT_STATUS_BYTE         = 0x01; // byte 15: "Initialized"
+    const unsigned char INIT_TRAILER[]           = {0x10, 0x11, 0x12, 0x13};
+    const int           INIT_MSG_READ_TIMEOUT_MS = 2500; // time to wait for init message after reset
     // Open the COM port with GENERIC_READ | GENERIC_WRITE, exclusive access
     HANDLE OpenPort(const std::string &portPath)
     {
