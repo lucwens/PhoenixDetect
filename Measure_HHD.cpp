@@ -8,26 +8,25 @@
 namespace
 {
     // Every record from the tracker is exactly 19 bytes (PTI Section 4.3)
-    const int RECORD_SIZE = 19;
+    const int RECORD_SIZE                     = 19;
 
     // ACK response size (same as record size — PTI Section 4.4)
-    const int ACK_SIZE = 19;
+    const int ACK_SIZE                        = 19;
 
     // Timing defaults observed in the IRP capture
     const uint32_t DEFAULT_SAMPLING_PERIOD_US = 115; // per-marker sampling period (μs)
 
     // Timeouts for the command/response cycle
-    const int CMD_ACK_TIMEOUT_MS   = 500;  // max wait for ACK after a command
-    const int CMD_ACK_POLL_MS      = 1;    // poll interval while waiting for ACK
-    const int STOP_GAP_MS          = 1500; // gap between first and second stop command
-    const int FETCH_READ_TIMEOUT_MS = 5;   // short timeout for non-blocking fetch reads
+    const int CMD_ACK_TIMEOUT_MS              = 500;  // max wait for ACK after a command
+    const int CMD_ACK_POLL_MS                 = 1;    // poll interval while waiting for ACK
+    const int STOP_GAP_MS                     = 1500; // gap between first and second stop command
+    const int FETCH_READ_TIMEOUT_MS           = 5;    // short timeout for non-blocking fetch reads
 
     // --------------------------------------------------------------------------
     // Build a PTI command buffer
     // --------------------------------------------------------------------------
     // Format: & <code> <index> <bytesPerParam> <numParams> CR [param data]
-    std::vector<uint8_t> BuildCommand(char code, char index, char bytesPerParam, char numParams,
-                                      const uint8_t *paramData = nullptr, int paramLen = 0)
+    std::vector<uint8_t> BuildCommand(char code, char index, char bytesPerParam, char numParams, const uint8_t *paramData = nullptr, int paramLen = 0)
     {
         std::vector<uint8_t> cmd;
         cmd.push_back(0x26); // '&'
@@ -54,8 +53,7 @@ namespace
         PurgeComm(hPort, PURGE_RXCLEAR);
 
         DWORD bytesWritten = 0;
-        if (!WriteFile(hPort, cmd.data(), static_cast<DWORD>(cmd.size()), &bytesWritten, NULL) ||
-            bytesWritten != cmd.size())
+        if (!WriteFile(hPort, cmd.data(), static_cast<DWORD>(cmd.size()), &bytesWritten, NULL) || bytesWritten != cmd.size())
         {
             std::cerr << "  [Measure] WriteFile failed (error " << GetLastError() << ")" << std::endl;
             return false;
@@ -80,8 +78,8 @@ namespace
 
         if (comstat.cbInQue < ACK_SIZE)
         {
-            std::cerr << "  [Measure] ACK timeout for command 0x" << std::hex << (int)cmd[1]
-                      << std::dec << " (got " << comstat.cbInQue << " bytes)" << std::endl;
+            std::cerr << "  [Measure] ACK timeout for command 0x" << std::hex << (int)cmd[1] << std::dec << " (got " << comstat.cbInQue << " bytes)"
+                      << std::endl;
             return false;
         }
 
@@ -97,8 +95,7 @@ namespace
         // Validate: byte 0 should echo the command code
         if (ackBuf[0] != cmd[1])
         {
-            std::cerr << "  [Measure] ACK mismatch: expected 0x" << std::hex << (int)cmd[1]
-                      << " got 0x" << (int)ackBuf[0] << std::dec << std::endl;
+            std::cerr << "  [Measure] ACK mismatch: expected 0x" << std::hex << (int)cmd[1] << " got 0x" << (int)ackBuf[0] << std::dec << std::endl;
             return false;
         }
 
@@ -121,9 +118,7 @@ namespace
     // --------------------------------------------------------------------------
     uint32_t DecodeBE32(const uint8_t *buf)
     {
-        return (static_cast<uint32_t>(buf[0]) << 24) |
-               (static_cast<uint32_t>(buf[1]) << 16) |
-               (static_cast<uint32_t>(buf[2]) << 8) |
+        return (static_cast<uint32_t>(buf[0]) << 24) | (static_cast<uint32_t>(buf[1]) << 16) | (static_cast<uint32_t>(buf[2]) << 8) |
                static_cast<uint32_t>(buf[3]);
     }
 
@@ -132,9 +127,7 @@ namespace
     // --------------------------------------------------------------------------
     int32_t DecodeBE24Signed(const uint8_t *buf)
     {
-        int32_t val = (static_cast<int32_t>(buf[0]) << 16) |
-                      (static_cast<int32_t>(buf[1]) << 8) |
-                      static_cast<int32_t>(buf[2]);
+        int32_t val = (static_cast<int32_t>(buf[0]) << 16) | (static_cast<int32_t>(buf[1]) << 8) | static_cast<int32_t>(buf[2]);
         if (val & 0x800000)
             val |= static_cast<int32_t>(0xFF000000); // sign-extend
         return val;
@@ -146,13 +139,13 @@ namespace
     HHD_MeasurementSample ParseRecord(const uint8_t *rec)
     {
         HHD_MeasurementSample s = {};
-        s.timestamp_us = DecodeBE32(&rec[0]);                     // bytes 1-4
-        s.x_mm         = DecodeBE24Signed(&rec[4]) / 100.0;      // bytes 5-7
-        s.y_mm         = DecodeBE24Signed(&rec[7]) / 100.0;      // bytes 8-10
-        s.z_mm         = DecodeBE24Signed(&rec[10]) / 100.0;     // bytes 11-13
-        s.status       = DecodeBE32(&rec[13]);                    // bytes 14-17
-        s.ledId        = rec[17] & 0x7F;                          // byte 18, bits 6-0
-        s.tcmId        = rec[18] & 0x0F;                          // byte 19, bits 3-0
+        s.timestamp_us          = DecodeBE32(&rec[0]);                // bytes 1-4
+        s.x_mm                  = DecodeBE24Signed(&rec[4]) / 100.0;  // bytes 5-7
+        s.y_mm                  = DecodeBE24Signed(&rec[7]) / 100.0;  // bytes 8-10
+        s.z_mm                  = DecodeBE24Signed(&rec[10]) / 100.0; // bytes 11-13
+        s.status                = DecodeBE32(&rec[13]);               // bytes 14-17
+        s.ledId                 = rec[17] & 0x7F;                     // byte 18, bits 6-0
+        s.tcmId                 = rec[18] & 0x0F;                     // byte 19, bits 3-0
         return s;
     }
 
@@ -163,18 +156,17 @@ namespace
 // --------------------------------------------------------------------------
 struct HHD_MeasurementSession
 {
-    HANDLE                        hPort;
-    int                           frequencyHz;
-    std::vector<HHD_MarkerEntry>  markers;
-    std::vector<uint8_t>          residual;
+    HANDLE                       hPort;
+    int                          frequencyHz;
+    std::vector<HHD_MarkerEntry> markers;
+    std::vector<uint8_t>         residual;
 };
 
 // --------------------------------------------------------------------------
 // Public API
 // --------------------------------------------------------------------------
 
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
-                                          const std::vector<HHD_MarkerEntry> &markers)
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers)
 {
     if (markers.empty())
     {
@@ -193,11 +185,11 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
     for (const auto &m : markers)
         totalFlashes += m.flashCount;
 
-    std::cout << "[Measure] Starting measurement: " << frequencyHz << " Hz, "
-              << markers.size() << " markers (" << totalFlashes << " flashes/frame)" << std::endl;
+    std::cout << "[Measure] Starting measurement: " << frequencyHz << " Hz, " << markers.size() << " markers (" << totalFlashes << " flashes/frame)"
+              << std::endl;
 
     // Set timeouts for command/response phase
-    COMMTIMEOUTS timeouts               = {};
+    COMMTIMEOUTS timeouts                = {};
     timeouts.ReadIntervalTimeout         = 50;
     timeouts.ReadTotalTimeoutConstant    = CMD_ACK_TIMEOUT_MS;
     timeouts.ReadTotalTimeoutMultiplier  = 10;
@@ -231,39 +223,38 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
     EncodeBE32(&timingParams[0], samplingPeriod_us);
     EncodeBE32(&timingParams[4], intermission_us);
 
-    std::cout << "  [Measure] Setting timing: period=" << samplingPeriod_us
-              << "us, intermission=" << intermission_us << "us" << std::endl;
+    std::cout << "  [Measure] Setting timing: period=" << samplingPeriod_us << "us, intermission=" << intermission_us << "us" << std::endl;
     auto cmdTiming = BuildCommand('v', '0', '4', '2', timingParams, 8);
     if (!SendCommand(hPort, cmdTiming))
         return nullptr;
 
     // 3. Signal Quality (SQR): &L 011 + 0x02
     uint8_t sqrParam = 0x02;
-    auto cmdSQR = BuildCommand('L', '0', '1', '1', &sqrParam, 1);
+    auto    cmdSQR   = BuildCommand('L', '0', '1', '1', &sqrParam, 1);
     if (!SendCommand(hPort, cmdSQR))
         return nullptr;
 
     // 4. Min Signal (MSR): &O 021 + 0x00 0x02
     uint8_t msrParams[] = {0x00, 0x02};
-    auto cmdMSR = BuildCommand('O', '0', '2', '1', msrParams, 2);
+    auto    cmdMSR      = BuildCommand('O', '0', '2', '1', msrParams, 2);
     if (!SendCommand(hPort, cmdMSR))
         return nullptr;
 
     // 5. Exposure Gain: &Y A11 + 0x08
     uint8_t gainParam = 0x08;
-    auto cmdGain = BuildCommand('Y', 'A', '1', '1', &gainParam, 1);
+    auto    cmdGain   = BuildCommand('Y', 'A', '1', '1', &gainParam, 1);
     if (!SendCommand(hPort, cmdGain))
         return nullptr;
 
     // 6. SOT Limit: &U 011 + 0x03
     uint8_t sotParam = 0x03;
-    auto cmdSOT = BuildCommand('U', '0', '1', '1', &sotParam, 1);
+    auto    cmdSOT   = BuildCommand('U', '0', '1', '1', &sotParam, 1);
     if (!SendCommand(hPort, cmdSOT))
         return nullptr;
 
     // 7. Tether Mode: &^ 011 + 0x0D
     uint8_t tetherParam = 0x0D;
-    auto cmdTether = BuildCommand('^', '0', '1', '1', &tetherParam, 1);
+    auto    cmdTether   = BuildCommand('^', '0', '1', '1', &tetherParam, 1);
     if (!SendCommand(hPort, cmdTether))
         return nullptr;
 
@@ -282,13 +273,13 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
     //     Command index = TCMID ('1'-'8'), 2 params of 1 byte each
     for (const auto &m : markers)
     {
-        uint8_t tcm = (m.tcmId >= 1 && m.tcmId <= 8) ? m.tcmId : 1;
-        uint8_t led = (m.ledId >= 1 && m.ledId <= 64) ? m.ledId : 1;
-        uint8_t fc  = (m.flashCount >= 1) ? m.flashCount : 1;
+        uint8_t tcm          = (m.tcmId >= 1 && m.tcmId <= 8) ? m.tcmId : 1;
+        uint8_t led          = (m.ledId >= 1 && m.ledId <= 64) ? m.ledId : 1;
+        uint8_t fc           = (m.flashCount >= 1) ? m.flashCount : 1;
 
-        char indexChar = static_cast<char>('0' + tcm); // '1'-'8'
-        uint8_t tfsParams[] = {led, fc};
-        auto cmdAppendTFS = BuildCommand('p', indexChar, '1', '2', tfsParams, 2);
+        char    indexChar    = static_cast<char>('0' + tcm); // '1'-'8'
+        uint8_t tfsParams[]  = {led, fc};
+        auto    cmdAppendTFS = BuildCommand('p', indexChar, '1', '2', tfsParams, 2);
         if (!SendCommand(hPort, cmdAppendTFS))
             return nullptr;
     }
@@ -300,7 +291,7 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
 
     // 12. Multi-Rate Sampling SM0: &X 018 + 8 zero bytes
     uint8_t multiRateParams[8] = {};
-    auto cmdMultiRate = BuildCommand('X', '0', '1', '8', multiRateParams, 8);
+    auto    cmdMultiRate       = BuildCommand('X', '0', '1', '8', multiRateParams, 8);
     if (!SendCommand(hPort, cmdMultiRate))
         return nullptr;
 
@@ -404,8 +395,7 @@ int FetchMeasurements(HHD_MeasurementSession *session, std::vector<HHD_Measureme
             }
             if (offset < session->residual.size())
             {
-                session->residual.erase(session->residual.begin(),
-                                        session->residual.begin() + offset);
+                session->residual.erase(session->residual.begin(), session->residual.begin() + offset);
             }
             else
             {
@@ -425,7 +415,7 @@ bool StopMeasurement(HHD_MeasurementSession *session)
     std::cout << "[Measure] Stopping measurement" << std::endl;
 
     // Restore longer timeouts for stop command ACK
-    COMMTIMEOUTS timeouts               = {};
+    COMMTIMEOUTS timeouts                = {};
     timeouts.ReadIntervalTimeout         = 50;
     timeouts.ReadTotalTimeoutConstant    = CMD_ACK_TIMEOUT_MS;
     timeouts.ReadTotalTimeoutMultiplier  = 10;

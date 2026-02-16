@@ -50,7 +50,8 @@ std::string BytesToString(const std::vector<unsigned char> &bytes)
     return str;
 }
 
-HANDLE CheckPort(int portNum) {
+HANDLE CheckPort(int portNum)
+{
     std::string portName = "\\\\.\\COM" + std::to_string(portNum);
 
     HANDLE hSerial       = CreateFileA(portName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
@@ -160,28 +161,32 @@ HANDLE CheckPort(int portNum) {
     return INVALID_HANDLE_VALUE;
 }
 
-bool PingDevice(HANDLE hSerial) {
+bool PingDevice(HANDLE hSerial)
+{
     // Command: &7000\r (Ping)
     // Hex: 26 37 30 30 30 0D
     std::string command = "&7000\r";
-    DWORD bytesWritten;
+    DWORD       bytesWritten;
 
     std::cout << "Sending Ping command (&70)..." << std::endl;
 
-    if (!WriteFile(hSerial, command.c_str(), (DWORD)command.length(), &bytesWritten, NULL)) {
+    if (!WriteFile(hSerial, command.c_str(), (DWORD)command.length(), &bytesWritten, NULL))
+    {
         std::cerr << "Error writing ping command." << std::endl;
         return false;
     }
 
     // Wait for response
     std::vector<unsigned char> buffer(256);
-    DWORD bytesRead;
+    DWORD                      bytesRead;
 
     // Give it some time to respond
     Sleep(200);
 
-    if (ReadFile(hSerial, buffer.data(), (DWORD)buffer.size(), &bytesRead, NULL)) {
-        if (bytesRead > 0) {
+    if (ReadFile(hSerial, buffer.data(), (DWORD)buffer.size(), &bytesRead, NULL))
+    {
+        if (bytesRead > 0)
+        {
             // Trim buffer to actual read size
             buffer.resize(bytesRead);
             std::cout << "Received response (" << bytesRead << " bytes):" << std::endl;
@@ -191,19 +196,26 @@ bool PingDevice(HANDLE hSerial) {
             // Check for expected response pattern
             // Expected: 37 30 ('7' '0') or ACK
             // If the buffer starts with '7' '0' (0x37 0x30), it is an echo/ack of the ping.
-            if (bytesRead >= 2 && buffer[0] == 0x37 && buffer[1] == 0x30) {
+            if (bytesRead >= 2 && buffer[0] == 0x37 && buffer[1] == 0x30)
+            {
                 std::cout << "Ping Acknowledged!" << std::endl;
                 return true;
-            } else {
+            }
+            else
+            {
                 std::cout << "Response does not match standard ACK (70...)." << std::endl;
                 // Note: driver.json showed 00000... response, so this might happen.
                 return false;
             }
-        } else {
+        }
+        else
+        {
             std::cout << "No response received." << std::endl;
             return false;
         }
-    } else {
+    }
+    else
+    {
         std::cerr << "Error reading response." << std::endl;
         return false;
     }
@@ -219,8 +231,8 @@ int main()
     std::cout << "  q - Quit" << std::endl;
     std::cout << std::endl;
 
-    HANDLE                  hPort        = INVALID_HANDLE_VALUE;
-    HHD_MeasurementSession *session      = nullptr;
+    HANDLE                  hPort   = INVALID_HANDLE_VALUE;
+    HHD_MeasurementSession *session = nullptr;
     std::string             detectedPort;
     DWORD                   detectedBaud = 0;
 
@@ -239,9 +251,7 @@ int main()
                 {
                     std::string portName = "COM" + std::to_string(i);
                     std::string portPath = "\\\\.\\" + portName;
-                    HANDLE hTest = CreateFileA(portPath.c_str(),
-                                               GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    HANDLE      hTest    = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
                     if (hTest == INVALID_HANDLE_VALUE)
                         continue;
                     CloseHandle(hTest);
@@ -277,9 +287,7 @@ int main()
 
                 // Open the detected port
                 std::string portPath = "\\\\.\\" + detectedPort;
-                hPort = CreateFileA(portPath.c_str(),
-                                    GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                hPort                = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
                 if (hPort == INVALID_HANDLE_VALUE)
                 {
                     std::cout << "Failed to open " << detectedPort << std::endl;
@@ -302,8 +310,7 @@ int main()
                     for (uint8_t led = 1; led <= 64; ++led)
                         markers.push_back({tcm, led, 1});
 
-                std::cout << "Starting measurement on " << detectedPort
-                          << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
+                std::cout << "Starting measurement on " << detectedPort << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
 
                 session = StartMeasurement(hPort, 10, markers);
                 if (session)
@@ -359,13 +366,8 @@ int main()
             FetchMeasurements(session, samples);
             for (const auto &s : samples)
             {
-                std::cout << "t=" << std::setw(10) << s.timestamp_us
-                          << " TCM" << (int)s.tcmId
-                          << " LED" << std::setw(2) << (int)s.ledId
-                          << std::fixed << std::setprecision(2)
-                          << " x=" << std::setw(9) << s.x_mm
-                          << " y=" << std::setw(9) << s.y_mm
-                          << " z=" << std::setw(9) << s.z_mm
+                std::cout << "t=" << std::setw(10) << s.timestamp_us << " TCM" << (int)s.tcmId << " LED" << std::setw(2) << (int)s.ledId << std::fixed
+                          << std::setprecision(2) << " x=" << std::setw(9) << s.x_mm << " y=" << std::setw(9) << s.y_mm << " z=" << std::setw(9) << s.z_mm
                           << std::endl;
             }
         }

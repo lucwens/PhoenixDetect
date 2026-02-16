@@ -24,10 +24,10 @@ namespace
         {2500000, 74, 82}, // Pass 2: 2.5 Mbaud
     };
 
-    const int CONFIG_SIZE_MAX_RETRIES      = 14;
-    const int CONFIG_SIZE_POLL_INTERVAL_MS = 110;
-    const int DTR_TOGGLE_DELAY_MS          = 10;
-    const int DTR_SETTLE_DELAY_MS          = 190;
+    const int CONFIG_SIZE_MAX_RETRIES            = 14;
+    const int CONFIG_SIZE_POLL_INTERVAL_MS       = 110;
+    const int DTR_TOGGLE_DELAY_MS                = 10;
+    const int DTR_SETTLE_DELAY_MS                = 190;
 
     // PTI Initial Message Set (Section 4.5, page 20):
     //   19 bytes total, sent by tracker after hardware reset.
@@ -45,7 +45,7 @@ namespace
     const unsigned char INIT_TRAILER[]           = {0x10, 0x11, 0x12, 0x13};
     const int           INIT_MSG_READ_TIMEOUT_MS = 2500; // time to wait for init message after reset
     // Open the COM port with GENERIC_READ | GENERIC_WRITE, exclusive access
-    HANDLE OpenPort(const std::string &portPath)
+    HANDLE              OpenPort(const std::string &portPath)
     {
         HANDLE h = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (h == INVALID_HANDLE_VALUE)
@@ -88,16 +88,16 @@ namespace
         }
 
         // ControlHandShake = 0x2D
-        dcb.fDtrControl     = DTR_CONTROL_ENABLE; // SERIAL_DTR_CONTROL
-        dcb.fOutxCtsFlow    = TRUE;                // SERIAL_CTS_HANDSHAKE
-        dcb.fOutxDsrFlow    = TRUE;                // SERIAL_DSR_HANDSHAKE
-        dcb.fDsrSensitivity = TRUE;                // SERIAL_DCD_HANDSHAKE
+        dcb.fDtrControl       = DTR_CONTROL_ENABLE; // SERIAL_DTR_CONTROL
+        dcb.fOutxCtsFlow      = TRUE;               // SERIAL_CTS_HANDSHAKE
+        dcb.fOutxDsrFlow      = TRUE;               // SERIAL_DSR_HANDSHAKE
+        dcb.fDsrSensitivity   = TRUE;               // SERIAL_DCD_HANDSHAKE
 
         // FlowReplace = 0x01
         dcb.fTXContinueOnXoff = TRUE; // SERIAL_XOFF_CONTINUE
 
-        dcb.XonLim  = xonLimit;
-        dcb.XoffLim = 0;
+        dcb.XonLim            = xonLimit;
+        dcb.XoffLim           = 0;
 
         if (!SetCommState(hPort, &dcb))
         {
@@ -176,7 +176,7 @@ namespace
     bool ReadInitialMessage(HANDLE hPort, std::string &serialNumber)
     {
         // Set read timeouts — the tracker needs time to boot after reset
-        COMMTIMEOUTS timeouts               = {};
+        COMMTIMEOUTS timeouts                = {};
         timeouts.ReadIntervalTimeout         = 50;
         timeouts.ReadTotalTimeoutConstant    = INIT_MSG_READ_TIMEOUT_MS;
         timeouts.ReadTotalTimeoutMultiplier  = 10;
@@ -308,7 +308,7 @@ namespace
         // The DTR toggle triggered a hardware reset; if a tracker is present
         // it will have sent the 19-byte Initial Message containing its serial
         // number (PTI manual Section 4.5, page 20).
-        bool initMsgOk = ReadInitialMessage(hPort, serialNumber);
+        bool initMsgOk    = ReadInitialMessage(hPort, serialNumber);
 
         // Detection succeeds if we got the Initial Message (definitive) or
         // CONFIG_SIZE responded (driver-level confirmation).
@@ -327,7 +327,7 @@ HHD_DetectionResult Detect_HHD(const std::string &portName)
     result.deviceFound         = false;
     result.portName            = portName;
 
-    std::string portPath = "\\\\.\\" + portName;
+    std::string portPath       = "\\\\.\\" + portName;
 
     std::cout << "[HHD] Starting detection on " << portName << std::endl;
 

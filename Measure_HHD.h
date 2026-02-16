@@ -48,8 +48,7 @@ struct HHD_MeasurementSession;
 //                 the frame duration together with the sampling period.
 //
 // Returns a session handle on success, or nullptr on failure.
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
-                                          const std::vector<HHD_MarkerEntry> &markers);
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers);
 
 // Fetch available measurement samples from the serial buffer.
 //
