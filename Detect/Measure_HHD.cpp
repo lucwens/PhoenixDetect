@@ -21,6 +21,7 @@ namespace
     const int CMD_ACK_POLL_MS                 = 1;    // poll interval while waiting for ACK
     const int STOP_GAP_MS                     = 1500; // gap between first and second stop command
     const int FETCH_READ_TIMEOUT_MS           = 5;    // short timeout for non-blocking fetch reads
+    const int RESET_POLL_MS                   = 10;   // poll interval while waiting for device after reset
 
     // --------------------------------------------------------------------------
     // Build a PTI command buffer
@@ -149,6 +150,35 @@ namespace
         return s;
     }
 
+    // --------------------------------------------------------------------------
+    // Wait for the device to become ready after a software reset.
+    // Polls the RX queue; returns as soon as any data arrives (device is alive)
+    // or when the timeout expires. Drains received data in either case.
+    // --------------------------------------------------------------------------
+    bool WaitForDeviceReady(HANDLE hPort, int timeoutMs)
+    {
+        DWORD   errors  = 0;
+        COMSTAT comstat = {};
+        int     elapsed = 0;
+
+        while (elapsed < timeoutMs)
+        {
+            ClearCommError(hPort, &errors, &comstat);
+            if (comstat.cbInQue > 0)
+            {
+                std::cout << "  [Measure] Device ready after " << elapsed << "ms (" << comstat.cbInQue << " bytes received)" << std::endl;
+                PurgeComm(hPort, PURGE_RXCLEAR);
+                return true;
+            }
+            Sleep(RESET_POLL_MS);
+            elapsed += RESET_POLL_MS;
+        }
+
+        std::cout << "  [Measure] Reset timeout (" << timeoutMs << "ms) — proceeding anyway" << std::endl;
+        PurgeComm(hPort, PURGE_RXCLEAR);
+        return false;
+    }
+
 } // anonymous namespace
 
 // --------------------------------------------------------------------------
@@ -166,7 +196,7 @@ struct HHD_MeasurementSession
 // Public API
 // --------------------------------------------------------------------------
 
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers)
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int resetTimeoutMs)
 {
     if (markers.empty())
     {
@@ -219,14 +249,19 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const st
 
     // --- Configuration sequence (replicating IRP capture) ---
 
-    // 1. Status/version query: &` 000
-    std::cout << "  [Measure] Sending status query (&`)" << std::endl;
-    auto cmdStatus = BuildCommand('`', '0', '0', '0');
-    if (!SendCommand(hPort, cmdStatus))
+    // 1. Software Reset: &` 000
+    //    This command does NOT generate an ACK — the device reboots.
+    //    VZSoft waits ~1.7s after sending this before continuing.
+    std::cout << "  [Measure] Sending Software Reset (&`)" << std::endl;
+    auto cmdReset = BuildCommand('`', '0', '0', '0');
+    if (!SendCommand(hPort, cmdReset, /*sendOnly=*/true))
     {
-        std::cerr << "  [Measure] Status query failed" << std::endl;
+        std::cerr << "  [Measure] Software Reset send failed" << std::endl;
         return nullptr;
     }
+
+    // Wait for device to reboot — returns early if the device sends data
+    WaitForDeviceReady(hPort, resetTimeoutMs);
 
     // 2. Set timing: &v 042 + [sampling_period(4)] + [intermission(4)]
     //    The intermission is computed so that:
