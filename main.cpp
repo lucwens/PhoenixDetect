@@ -1,4 +1,5 @@
 #include "Detect_HHD.h"
+#include "Measure_HHD.h"
 
 #include <windows.h>
 #include <iostream>
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cctype>
+#include <conio.h>
 
 // VisualEyez Configuration
 // Based on logs: 2,500,000 baud, 8 data bits, 1 stop bit, No parity.
@@ -209,67 +211,167 @@ bool PingDevice(HANDLE hSerial) {
 
 int main()
 {
-    std::cout << "VisualEyez Tracker Detector" << std::endl;
+    std::cout << "VisualEyez Tracker Interactive Console" << std::endl;
     std::cout << "==========================================" << std::endl;
+    std::cout << "  h - Detect HHD on COM1-COM16" << std::endl;
+    std::cout << "  s - Start measurement (TCM 1&2, all markers, 10 Hz)" << std::endl;
+    std::cout << "  t - Stop measurement" << std::endl;
+    std::cout << "  q - Quit" << std::endl;
+    std::cout << std::endl;
 
-    bool found = false;
+    HANDLE                  hPort        = INVALID_HANDLE_VALUE;
+    HHD_MeasurementSession *session      = nullptr;
+    std::string             detectedPort;
+    DWORD                   detectedBaud = 0;
 
-    // --- Method 1: HHD detection sequence (DTR toggle + CONFIG_SIZE polling) ---
-    std::cout << "\n--- HHD Detection (DTR reset + CONFIG_SIZE polling) ---" << std::endl;
-    for (int i = 1; i <= 32; ++i)
+    while (true)
     {
-        std::string portName = "COM" + std::to_string(i);
-
-        // Quick check: can we open the port at all?
-        std::string portPath = "\\\\.\\" + portName;
-        HANDLE      hTest    = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hTest == INVALID_HANDLE_VALUE)
-            continue; // Port doesn't exist or is in use
-        CloseHandle(hTest);
-
-        HHD_DetectionResult result = Detect_HHD(portName);
-        if (result.deviceFound)
+        // --- Check for keyboard input (non-blocking) ---
+        if (_kbhit())
         {
-            found = true;
-            std::cout << "\n*** VisualEyez Tracker DETECTED via HHD method ***" << std::endl;
-            std::cout << "Port: " << result.portName << std::endl;
-            std::cout << "Baud: " << result.detectedBaudRate << std::endl;
-            if (!result.serialNumber.empty())
-                std::cout << "Serial Number: " << result.serialNumber << std::endl;
-            std::cout << "Config Size: " << result.configSize << std::endl;
-            if (!result.configData.empty())
+            int ch = _getch();
+
+            // 'h' — scan COM1-COM16 for HHD devices
+            if (ch == 'h' || ch == 'H')
             {
-                std::cout << "Config Data (" << result.configData.size() << " bytes): ";
-                std::cout << BytesToHex(result.configData) << std::endl;
+                std::cout << "\n--- Scanning COM1-COM16 for HHD devices ---" << std::endl;
+                for (int i = 1; i <= 16; ++i)
+                {
+                    std::string portName = "COM" + std::to_string(i);
+                    std::string portPath = "\\\\.\\" + portName;
+                    HANDLE hTest = CreateFileA(portPath.c_str(),
+                                               GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hTest == INVALID_HANDLE_VALUE)
+                        continue;
+                    CloseHandle(hTest);
+
+                    std::cout << "Probing " << portName << "..." << std::endl;
+                    HHD_DetectionResult result = Detect_HHD(portName);
+                    if (result.deviceFound)
+                    {
+                        std::cout << "  FOUND on " << result.portName;
+                        if (!result.serialNumber.empty())
+                            std::cout << "  Serial: " << result.serialNumber;
+                        std::cout << "  Baud: " << result.detectedBaudRate << std::endl;
+                        detectedPort = result.portName;
+                        detectedBaud = result.detectedBaudRate;
+                    }
+                }
+                std::cout << "--- Scan complete ---\n" << std::endl;
             }
-            std::cout << "**************************************************\n" << std::endl;
-            break;
-        }
-    }
 
-    // --- Method 2: Init-pattern scan (original method) ---
-    if (!found)
-    {
-        std::cout << "\n--- Init-Pattern Scan (" << TARGET_BAUDRATE << " baud, 8N1) ---" << std::endl;
-        for (int i = 1; i <= 32; ++i)
-        {
-            HANDLE hDevice = CheckPort(i);
-            if (hDevice != INVALID_HANDLE_VALUE)
+            // 's' — start measurement
+            else if (ch == 's' || ch == 'S')
             {
-                found = true;
-                PingDevice(hDevice);
-                CloseHandle(hDevice);
+                if (session)
+                {
+                    std::cout << "Measurement already running. Press 't' to stop first." << std::endl;
+                    continue;
+                }
+                if (detectedPort.empty())
+                {
+                    std::cout << "No device detected yet. Press 'h' to scan first." << std::endl;
+                    continue;
+                }
+
+                // Open the detected port
+                std::string portPath = "\\\\.\\" + detectedPort;
+                hPort = CreateFileA(portPath.c_str(),
+                                    GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hPort == INVALID_HANDLE_VALUE)
+                {
+                    std::cout << "Failed to open " << detectedPort << std::endl;
+                    continue;
+                }
+
+                // Configure baud rate to match detected device
+                DCB dcb       = {};
+                dcb.DCBlength = sizeof(dcb);
+                GetCommState(hPort, &dcb);
+                dcb.BaudRate = detectedBaud;
+                dcb.ByteSize = 8;
+                dcb.StopBits = ONESTOPBIT;
+                dcb.Parity   = NOPARITY;
+                SetCommState(hPort, &dcb);
+
+                // All markers (LED 1-64) on TCM 1 and TCM 2, 1 flash each
+                std::vector<HHD_MarkerEntry> markers;
+                for (uint8_t tcm = 1; tcm <= 2; ++tcm)
+                    for (uint8_t led = 1; led <= 64; ++led)
+                        markers.push_back({tcm, led, 1});
+
+                std::cout << "Starting measurement on " << detectedPort
+                          << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
+
+                session = StartMeasurement(hPort, 10, markers);
+                if (session)
+                    std::cout << "Measurement started." << std::endl;
+                else
+                {
+                    std::cout << "Failed to start measurement." << std::endl;
+                    CloseHandle(hPort);
+                    hPort = INVALID_HANDLE_VALUE;
+                }
+            }
+
+            // 't' — stop measurement
+            else if (ch == 't' || ch == 'T')
+            {
+                if (!session)
+                {
+                    std::cout << "No measurement running." << std::endl;
+                    continue;
+                }
+                std::cout << "Stopping measurement..." << std::endl;
+                StopMeasurement(session);
+                session = nullptr;
+                if (hPort != INVALID_HANDLE_VALUE)
+                {
+                    CloseHandle(hPort);
+                    hPort = INVALID_HANDLE_VALUE;
+                }
+                std::cout << "Measurement stopped." << std::endl;
+            }
+
+            // 'q' — quit
+            else if (ch == 'q' || ch == 'Q')
+            {
+                if (session)
+                {
+                    StopMeasurement(session);
+                    session = nullptr;
+                }
+                if (hPort != INVALID_HANDLE_VALUE)
+                {
+                    CloseHandle(hPort);
+                    hPort = INVALID_HANDLE_VALUE;
+                }
                 break;
             }
         }
+
+        // --- Fetch and display measurement data ---
+        if (session)
+        {
+            std::vector<HHD_MeasurementSample> samples;
+            FetchMeasurements(session, samples);
+            for (const auto &s : samples)
+            {
+                std::cout << "t=" << std::setw(10) << s.timestamp_us
+                          << " TCM" << (int)s.tcmId
+                          << " LED" << std::setw(2) << (int)s.ledId
+                          << std::fixed << std::setprecision(2)
+                          << " x=" << std::setw(9) << s.x_mm
+                          << " y=" << std::setw(9) << s.y_mm
+                          << " z=" << std::setw(9) << s.z_mm
+                          << std::endl;
+            }
+        }
+
+        Sleep(1); // avoid busy-waiting
     }
 
-    if (!found)
-    {
-        std::cout << "\nNo VisualEyez Tracker detected by either method." << std::endl;
-    }
-
-    std::cout << "\nPress Enter to exit..." << std::endl;
-    std::cin.get();
     return 0;
 }
