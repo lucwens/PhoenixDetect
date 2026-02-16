@@ -1,5 +1,7 @@
 #include "Detect_HHD.h"
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 // --------------------------------------------------------------------------
 // Configuration for each baud-rate detection pass
@@ -23,6 +25,22 @@ static const int CONFIG_SIZE_MAX_RETRIES     = 14;
 static const int CONFIG_SIZE_POLL_INTERVAL_MS = 110;
 static const int DTR_TOGGLE_DELAY_MS          = 10;
 static const int DTR_SETTLE_DELAY_MS          = 190;
+
+// PTI Initial Message Set (Section 4.5, page 20):
+//   19 bytes total, sent by tracker after hardware reset.
+//   Bytes 1-4:   01 02 03 04 (header)
+//   Bytes 5-12:  Tracker Serial Number (8 bytes, MSB first)
+//   Bytes 13-14: Reserved
+//   Byte 15:     01 (Initialized)
+//   Bytes 16-19: 10 11 12 13 (trailer)
+static const int           INIT_MSG_SIZE        = 19;
+static const int           INIT_SERIAL_OFFSET   = 4;   // serial number starts at byte 5 (0-indexed: 4)
+static const int           INIT_SERIAL_LENGTH   = 8;
+static const unsigned char INIT_HEADER[]        = {0x01, 0x02, 0x03, 0x04};
+static const int           INIT_HEADER_SIZE     = sizeof(INIT_HEADER);
+static const unsigned char INIT_STATUS_BYTE     = 0x01; // byte 15: "Initialized"
+static const unsigned char INIT_TRAILER[]       = {0x10, 0x11, 0x12, 0x13};
+static const int           INIT_MSG_READ_TIMEOUT_MS = 2500; // time to wait for init message after reset
 
 // --------------------------------------------------------------------------
 // Internal helpers
@@ -154,6 +172,64 @@ namespace
         DeviceIoControl(hPort, IOCTL_SERIAL_GET_DTRRTS, NULL, 0, &dtrRts, sizeof(dtrRts), &bytesReturned, NULL);
     }
 
+    // Phase 6: Read the 19-byte Initial Message sent by the tracker after reset.
+    // The DTR toggle triggers a hardware reset; the tracker responds with the
+    // Initial Message containing the 8-byte serial number (PTI manual, Section 4.5).
+    // Returns true if the message was received and parsed successfully.
+    bool ReadInitialMessage(HANDLE hPort, std::string &serialNumber)
+    {
+        // Set read timeouts — the tracker needs time to boot after reset
+        COMMTIMEOUTS timeouts               = {};
+        timeouts.ReadIntervalTimeout         = 50;
+        timeouts.ReadTotalTimeoutConstant    = INIT_MSG_READ_TIMEOUT_MS;
+        timeouts.ReadTotalTimeoutMultiplier  = 10;
+        timeouts.WriteTotalTimeoutConstant   = 50;
+        timeouts.WriteTotalTimeoutMultiplier = 10;
+        SetCommTimeouts(hPort, &timeouts);
+
+        // Read into a buffer large enough for the message plus any preceding noise
+        unsigned char buffer[256] = {};
+        DWORD         bytesRead   = 0;
+
+        if (!ReadFile(hPort, buffer, sizeof(buffer), &bytesRead, NULL) || bytesRead < INIT_MSG_SIZE)
+        {
+            if (bytesRead > 0)
+                std::cout << "  [HHD] Read " << bytesRead << " bytes but need at least " << INIT_MSG_SIZE << " for Initial Message" << std::endl;
+            return false;
+        }
+
+        // Scan for the 01 02 03 04 header in the received data
+        for (DWORD i = 0; i + INIT_MSG_SIZE <= bytesRead; i++)
+        {
+            // Check header
+            if (memcmp(&buffer[i], INIT_HEADER, INIT_HEADER_SIZE) != 0)
+                continue;
+
+            // Check status byte (byte 15, 0-indexed: i+14)
+            if (buffer[i + 14] != INIT_STATUS_BYTE)
+                continue;
+
+            // Check trailer (bytes 16-19, 0-indexed: i+15..i+18)
+            if (memcmp(&buffer[i + 15], INIT_TRAILER, sizeof(INIT_TRAILER)) != 0)
+                continue;
+
+            // Valid Initial Message found — extract serial number (bytes 5-12, MSB first)
+            std::stringstream ss;
+            ss << std::hex << std::uppercase << std::setfill('0');
+            for (int j = 0; j < INIT_SERIAL_LENGTH; j++)
+            {
+                ss << std::setw(2) << (int)buffer[i + INIT_SERIAL_OFFSET + j];
+            }
+            serialNumber = ss.str();
+
+            std::cout << "  [HHD] Initial Message received — Serial Number: " << serialNumber << std::endl;
+            return true;
+        }
+
+        std::cout << "  [HHD] No valid Initial Message found in " << bytesRead << " bytes read" << std::endl;
+        return false;
+    }
+
     // Phase 5: Poll CONFIG_SIZE in a loop, checking for device response.
     // Returns true if configSize becomes non-zero (device detected).
     bool PollConfigSize(HANDLE hPort, DWORD &configSize)
@@ -183,9 +259,10 @@ namespace
         return false;
     }
 
-    // Run a single detection pass: configure port, then poll for device response.
-    // Phases 3-5 from the IRP capture.
-    bool RunDetectionPass(HANDLE hPort, const BaudRatePass &pass, DWORD &configSize)
+    // Run a single detection pass: configure port, poll for device response,
+    // then read the Initial Message for definitive serial number confirmation.
+    // Phases 3-6 from the IRP capture + PTI manual Section 4.5.
+    bool RunDetectionPass(HANDLE hPort, const BaudRatePass &pass, DWORD &configSize, std::string &serialNumber)
     {
         // Phase 3, Step 1: Read current handshake settings
         DCB dcb       = {};
@@ -194,6 +271,9 @@ namespace
 
         // Phase 3, Step 2: DTR toggle (device reset/wake-up)
         ToggleDTR(hPort);
+
+        // Purge any stale data from buffers before configuring
+        PurgeComm(hPort, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
         // Phase 4, Step 3: Configure handshake with first XonLimit
         if (!ConfigureHandshake(hPort, pass.xonLimit1))
@@ -225,7 +305,17 @@ namespace
         QueryDtrRts(hPort);
 
         // Phase 5: Poll CONFIG_SIZE for device response
-        return PollConfigSize(hPort, configSize);
+        bool configSizeOk = PollConfigSize(hPort, configSize);
+
+        // Phase 6: Read Initial Message — definitive tracker detection.
+        // The DTR toggle triggered a hardware reset; if a tracker is present
+        // it will have sent the 19-byte Initial Message containing its serial
+        // number (PTI manual Section 4.5, page 20).
+        bool initMsgOk = ReadInitialMessage(hPort, serialNumber);
+
+        // Detection succeeds if we got the Initial Message (definitive) or
+        // CONFIG_SIZE responded (driver-level confirmation).
+        return initMsgOk || configSizeOk;
     }
 
 } // anonymous namespace
@@ -263,11 +353,13 @@ HHD_DetectionResult Detect_HHD(const std::string &portName)
 
         std::cout << "  [HHD] Pass " << (passIdx + 1) << ": trying " << pass.baudRate << " baud" << std::endl;
 
-        if (RunDetectionPass(hPort, pass, configSize))
+        std::string serialNumber;
+        if (RunDetectionPass(hPort, pass, configSize, serialNumber))
         {
             result.deviceFound      = true;
             result.detectedBaudRate = pass.baudRate;
             result.configSize       = configSize;
+            result.serialNumber     = serialNumber;
 
             // Read config data if CONFIG_SIZE returned non-zero
             if (configSize > 0)
@@ -280,6 +372,8 @@ HHD_DetectionResult Detect_HHD(const std::string &portName)
 
             std::cout << "[HHD] Device DETECTED on " << portName << " at " << pass.baudRate << " baud"
                       << " (configSize=" << configSize << ")" << std::endl;
+            if (!serialNumber.empty())
+                std::cout << "[HHD] Tracker Serial Number: " << serialNumber << std::endl;
 
             CloseHandle(hPort);
             return result;

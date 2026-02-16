@@ -234,6 +234,8 @@ int main()
             std::cout << "\n*** VisualEyez Tracker DETECTED via HHD method ***" << std::endl;
             std::cout << "Port: " << result.portName << std::endl;
             std::cout << "Baud: " << result.detectedBaudRate << std::endl;
+            if (!result.serialNumber.empty())
+                std::cout << "Serial Number: " << result.serialNumber << std::endl;
             std::cout << "Config Size: " << result.configSize << std::endl;
             if (!result.configData.empty())
             {

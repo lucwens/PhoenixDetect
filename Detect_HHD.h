@@ -22,6 +22,7 @@ struct HHD_DetectionResult
     DWORD             configSize;
     std::vector<BYTE> configData;
     std::string       portName;
+    std::string       serialNumber; // 8-byte tracker serial number from Initial Message (hex)
 };
 
 // Performs the HHD Software detection sequence on the specified COM port.
@@ -35,7 +36,11 @@ struct HHD_DetectionResult
 //   Phase 3:   GET_HANDFLOW + DTR toggle (CLR-SET-CLR-SET, ~10ms spacing)
 //   Phase 4:   Configure handshake, set baud, assert RTS/DTR, set 8N1
 //   Phase 5:   Poll CONFIG_SIZE (14 retries, ~110ms interval)
-//   Phase 6:   If no response, repeat at next baud rate (2M -> 2.5M)
+//   Phase 6:   Read Initial Message (19 bytes: header 01 02 03 04 +
+//              8-byte serial number + reserved + 01 + trailer 10 11 12 13)
+//              per PTI Low Level Control Kit manual, Section 4.5, page 20.
+//              This is the definitive confirmation of tracker presence.
+//   Phase 7:   If no response, repeat at next baud rate (2M -> 2.5M)
 //
 // Parameters:
 //   portName - COM port name, e.g. "COM9"
