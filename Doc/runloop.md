@@ -106,7 +106,8 @@ Total frame period = (16 channels × 115 μs) + 998,045 μs = 1,840 + 998,045 = 
 
 General formula for a desired frequency:
 ```
-intermission_us = (1,000,000 / frequency_Hz) - (num_channels × sampling_period_us)
+total_flashes   = sum of flashCount across all markers in the TFS
+intermission_us = (1,000,000 / frequency_Hz) - (total_flashes × sampling_period_us)
 ```
 
 ---
@@ -163,6 +164,15 @@ Measure_HHD.cpp  — implementation
 ### 4.2 Public API
 
 ```cpp
+// A single marker entry for the Target Flashing Sequence (TFS).
+// Maps directly to a &p append command (PTI manual Section 4.7.8).
+struct HHD_MarkerEntry
+{
+    uint8_t tcmId;      // TCM module ID (1-8)
+    uint8_t ledId;      // LED marker ID (1-64)
+    uint8_t flashCount; // flashes per cycle (1-255, typically 1)
+};
+
 // A single parsed measurement sample
 struct HHD_MeasurementSample
 {
@@ -180,11 +190,13 @@ struct HHD_MeasurementSession;
 
 // Start a measurement session on an already-detected port.
 // Configures the tracker and begins periodic sampling at the given frequency.
-//   hPort         — open COM port handle (from detection phase)
-//   frequencyHz   — desired measurement rate (1-4600 Hz, clamped to valid range)
-//   numChannels   — number of LED channels to enable (1-16, on TCM 1)
+//   hPort       — open COM port handle (from detection phase)
+//   frequencyHz — desired measurement rate (1-4600 Hz, clamped)
+//   markers     — TFS entries: which markers on which TCMs to sample.
+//                 Each entry maps to one &p append command.
 // Returns a session handle, or nullptr on failure.
-HHD_MeasurementSession* StartMeasurement(HANDLE hPort, int frequencyHz, int numChannels);
+HHD_MeasurementSession* StartMeasurement(HANDLE hPort, int frequencyHz,
+                                          const std::vector<HHD_MarkerEntry>& markers);
 
 // Fetch available measurement samples from the serial buffer.
 // Call this in a run loop (non-blocking if no data available).
@@ -199,14 +211,32 @@ int FetchMeasurements(HHD_MeasurementSession* session, std::vector<HHD_Measureme
 bool StopMeasurement(HHD_MeasurementSession* session);
 ```
 
+**Example: 16 LEDs on TCM 1 (equivalent to IRP capture)**
+```cpp
+std::vector<HHD_MarkerEntry> markers;
+for (uint8_t i = 1; i <= 16; i++)
+    markers.push_back({1, i, 1}); // TCM 1, LED i, 1 flash
+auto* session = StartMeasurement(hPort, 1, markers);
+```
+
+**Example: markers across multiple TCMs**
+```cpp
+std::vector<HHD_MarkerEntry> markers = {
+    {1, 1, 1}, {1, 2, 1}, {1, 3, 1}, {1, 4, 1},  // TCM 1, LEDs 1-4
+    {5, 8, 3}, {5, 10, 1}, {5, 6, 2},              // TCM 5, LEDs 8/10/6
+};
+auto* session = StartMeasurement(hPort, 10, markers); // 10 Hz
+```
+
 ### 4.3 Internal Design
 
 #### Session State
 
 The `HHD_MeasurementSession` struct holds:
 - `HANDLE hPort` — the COM port handle (not owned, caller manages lifetime)
-- `int frequencyHz`, `int numChannels` — active configuration
-- `std::vector<uint8_t> residualBuffer` — leftover bytes from partial reads
+- `int frequencyHz` — active frequency
+- `std::vector<HHD_MarkerEntry> markers` — the TFS configuration
+- `std::vector<uint8_t> residual` — leftover bytes from partial reads
   (since ReadFile may return a non-multiple of 19 bytes)
 
 #### StartMeasurement Flow
@@ -225,7 +255,7 @@ Replicates the exact IRP capture sequence:
    - `&^ 011` + `0d` — tether mode
    - `&Q A00` — single sampling
    - `&p 000` — clear TFS
-   - `&p 112` + `{ch} 01` × numChannels — enable channels
+   - `&p {tcmId}12` + `{ledId} {flashCount}` × each marker entry — program TFS
    - `&o 000` — sync EOF
    - `&X 018` + 8 zeros — multi-rate SM0
    - `&r 000` — upload TFS
@@ -238,9 +268,10 @@ Replicates the exact IRP capture sequence:
 
 ```cpp
 const uint32_t SAMPLING_PERIOD_US = 115; // per-marker, from IRP capture
+uint32_t totalFlashes    = sum of flashCount across all markers;
 uint32_t framePeriod_us  = 1000000 / frequencyHz;
-uint32_t intermission_us = framePeriod_us - (numChannels * SAMPLING_PERIOD_US);
-// Clamp intermission to minimum 0
+uint32_t activeTime_us   = totalFlashes * SAMPLING_PERIOD_US;
+uint32_t intermission_us = (framePeriod_us > activeTime_us) ? (framePeriod_us - activeTime_us) : 0;
 ```
 
 Encode into `&v` command:
