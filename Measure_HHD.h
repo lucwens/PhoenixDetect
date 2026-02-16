@@ -5,6 +5,15 @@
 #include <string>
 #include <vector>
 
+// A single marker entry for the Target Flashing Sequence (TFS).
+// Maps directly to a &p append command (PTI manual Section 4.7.8, page 32).
+struct HHD_MarkerEntry
+{
+    uint8_t tcmId;      // TCM module ID (1-8)
+    uint8_t ledId;      // LED marker ID (1-64)
+    uint8_t flashCount; // flashes per cycle (1-255, typically 1)
+};
+
 // A single parsed measurement sample (PTI manual Section 4.3, page 17).
 // Each sample is decoded from a 19-byte Data Set record.
 struct HHD_MeasurementSample
@@ -33,10 +42,14 @@ struct HHD_MeasurementSession;
 // Parameters:
 //   hPort       — open COM port handle (caller retains ownership)
 //   frequencyHz — desired measurement rate in Hz (1–4600, clamped)
-//   numChannels — number of LED channels on TCM 1 to enable (1–16)
+//   markers     — TFS entries defining which markers on which TCMs to sample.
+//                 Each entry maps to one &p append command.
+//                 The total number of entries (sum of flashCounts) determines
+//                 the frame duration together with the sampling period.
 //
 // Returns a session handle on success, or nullptr on failure.
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numChannels);
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
+                                          const std::vector<HHD_MarkerEntry> &markers);
 
 // Fetch available measurement samples from the serial buffer.
 //

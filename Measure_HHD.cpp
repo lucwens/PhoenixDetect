@@ -23,17 +23,6 @@ namespace
     const int FETCH_READ_TIMEOUT_MS = 5;   // short timeout for non-blocking fetch reads
 
     // --------------------------------------------------------------------------
-    // Session structure (opaque to callers)
-    // --------------------------------------------------------------------------
-    struct SessionImpl
-    {
-        HANDLE               hPort;
-        int                  frequencyHz;
-        int                  numChannels;
-        std::vector<uint8_t> residual; // leftover bytes from partial record reads
-    };
-
-    // --------------------------------------------------------------------------
     // Build a PTI command buffer
     // --------------------------------------------------------------------------
     // Format: & <code> <index> <bytesPerParam> <numParams> CR [param data]
@@ -174,30 +163,38 @@ namespace
 // --------------------------------------------------------------------------
 struct HHD_MeasurementSession
 {
-    HANDLE               hPort;
-    int                  frequencyHz;
-    int                  numChannels;
-    std::vector<uint8_t> residual;
+    HANDLE                        hPort;
+    int                           frequencyHz;
+    std::vector<HHD_MarkerEntry>  markers;
+    std::vector<uint8_t>          residual;
 };
 
 // --------------------------------------------------------------------------
 // Public API
 // --------------------------------------------------------------------------
 
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numChannels)
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz,
+                                          const std::vector<HHD_MarkerEntry> &markers)
 {
-    // Clamp parameters to valid ranges
+    if (markers.empty())
+    {
+        std::cerr << "[Measure] No markers specified" << std::endl;
+        return nullptr;
+    }
+
+    // Clamp frequency to valid range
     if (frequencyHz < 1)
         frequencyHz = 1;
     if (frequencyHz > 4600)
         frequencyHz = 4600;
-    if (numChannels < 1)
-        numChannels = 1;
-    if (numChannels > 16)
-        numChannels = 16;
+
+    // Count total samples per frame (sum of all flash counts)
+    uint32_t totalFlashes = 0;
+    for (const auto &m : markers)
+        totalFlashes += m.flashCount;
 
     std::cout << "[Measure] Starting measurement: " << frequencyHz << " Hz, "
-              << numChannels << " channels" << std::endl;
+              << markers.size() << " markers (" << totalFlashes << " flashes/frame)" << std::endl;
 
     // Set timeouts for command/response phase
     COMMTIMEOUTS timeouts               = {};
@@ -223,10 +220,12 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numC
     }
 
     // 2. Set timing: &v 042 + [sampling_period(4)] + [intermission(4)]
-    uint32_t samplingPeriod_us  = DEFAULT_SAMPLING_PERIOD_US;
-    uint32_t framePeriod_us     = 1000000 / static_cast<uint32_t>(frequencyHz);
-    uint32_t channelTime_us     = static_cast<uint32_t>(numChannels) * samplingPeriod_us;
-    uint32_t intermission_us    = (framePeriod_us > channelTime_us) ? (framePeriod_us - channelTime_us) : 0;
+    //    The intermission is computed so that:
+    //    frame_period = totalFlashes * sampling_period + intermission = 1e6/freq
+    uint32_t samplingPeriod_us = DEFAULT_SAMPLING_PERIOD_US;
+    uint32_t framePeriod_us    = 1000000 / static_cast<uint32_t>(frequencyHz);
+    uint32_t activeTime_us     = totalFlashes * samplingPeriod_us;
+    uint32_t intermission_us   = (framePeriod_us > activeTime_us) ? (framePeriod_us - activeTime_us) : 0;
 
     uint8_t timingParams[8];
     EncodeBE32(&timingParams[0], samplingPeriod_us);
@@ -274,16 +273,22 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numC
         return nullptr;
 
     // 9. Clear TFS: &p 000
-    std::cout << "  [Measure] Programming TFS (" << numChannels << " channels)" << std::endl;
+    std::cout << "  [Measure] Programming TFS (" << markers.size() << " markers across TCMs)" << std::endl;
     auto cmdClearTFS = BuildCommand('p', '0', '0', '0');
     if (!SendCommand(hPort, cmdClearTFS))
         return nullptr;
 
-    // 10. Append channels to TFS: &p 112 + {channel_id} {01} for each channel
-    for (int ch = 1; ch <= numChannels; ch++)
+    // 10. Append each marker to TFS: &p {tcmId}12 + {ledId} {flashCount}
+    //     Command index = TCMID ('1'-'8'), 2 params of 1 byte each
+    for (const auto &m : markers)
     {
-        uint8_t tfsParams[] = {static_cast<uint8_t>(ch), 0x01}; // LEDID=ch, #flash=1
-        auto cmdAppendTFS = BuildCommand('p', '1', '1', '2', tfsParams, 2);
+        uint8_t tcm = (m.tcmId >= 1 && m.tcmId <= 8) ? m.tcmId : 1;
+        uint8_t led = (m.ledId >= 1 && m.ledId <= 64) ? m.ledId : 1;
+        uint8_t fc  = (m.flashCount >= 1) ? m.flashCount : 1;
+
+        char indexChar = static_cast<char>('0' + tcm); // '1'-'8'
+        uint8_t tfsParams[] = {led, fc};
+        auto cmdAppendTFS = BuildCommand('p', indexChar, '1', '2', tfsParams, 2);
         if (!SendCommand(hPort, cmdAppendTFS))
             return nullptr;
     }
@@ -332,7 +337,7 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, int numC
     HHD_MeasurementSession *session = new HHD_MeasurementSession();
     session->hPort                  = hPort;
     session->frequencyHz            = frequencyHz;
-    session->numChannels            = numChannels;
+    session->markers                = markers;
     return session;
 }
 
