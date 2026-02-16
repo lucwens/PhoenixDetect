@@ -12,5 +12,5 @@
     <File Path="Doc/runloop.md" />
     <File Path="Doc/VZDaq_Manual_V200.pdf" />
   </Folder>
-  <Project Path="PhoenixDetect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
+  <Project Path="Detect/Detect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
 </Solution>
