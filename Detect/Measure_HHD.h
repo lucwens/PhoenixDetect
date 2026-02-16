@@ -34,21 +34,23 @@ struct HHD_MeasurementSession;
 // Start a measurement session on an already-open COM port.
 //
 // Sends the full configuration sequence observed in the IRP capture:
-//   &` (status query) -> &v (timing) -> &L (SQR) -> &O (MSR) -> &Y (gain)
+//   &` (software reset) -> &v (timing) -> &L (SQR) -> &O (MSR) -> &Y (gain)
 //   -> &U (SOT) -> &^ (tether) -> &Q (single sampling) -> &p (clear + program TFS)
 //   -> &o (sync EOF) -> &X (multi-rate) -> &r (upload TFS) -> &: (refraction off)
 //   -> &S (internal trigger) -> &3 (START)
 //
 // Parameters:
-//   hPort       — open COM port handle (caller retains ownership)
-//   frequencyHz — desired measurement rate in Hz (1–4600, clamped)
-//   markers     — TFS entries defining which markers on which TCMs to sample.
-//                 Each entry maps to one &p append command.
-//                 The total number of entries (sum of flashCounts) determines
-//                 the frame duration together with the sampling period.
+//   hPort          — open COM port handle (caller retains ownership)
+//   frequencyHz    — desired measurement rate in Hz (1–4600, clamped)
+//   markers        — TFS entries defining which markers on which TCMs to sample.
+//                    Each entry maps to one &p append command.
+//                    The total number of entries (sum of flashCounts) determines
+//                    the frame duration together with the sampling period.
+//   resetTimeoutMs — max time (ms) to wait for the device to become ready after
+//                    software reset. VZSoft waits ~1.7s; default 2000ms.
 //
 // Returns a session handle on success, or nullptr on failure.
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers);
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int resetTimeoutMs = 2000);
 
 // Fetch available measurement samples from the serial buffer.
 //

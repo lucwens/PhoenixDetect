@@ -6,6 +6,7 @@
   <Folder Name="/Doc/">
     <File Path="Doc/Cheat sheet.md" />
     <File Path="Doc/Detect analysis Gemini.md" />
+    <File Path="Doc/MeasureFailure.md" />
     <File Path="Doc/OnlineUserManual.pdf" />
     <File Path="Doc/PTI LOW LEVEL CONTROL KIT FEB 2022 - CONFIDENTIAL.PDF" />
     <File Path="Doc/QuickStartGuide.pdf" />
