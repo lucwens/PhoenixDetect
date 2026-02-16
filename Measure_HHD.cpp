@@ -200,6 +200,23 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const st
     // Purge all buffers for clean state
     PurgeComm(hPort, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
+    // Wait for any Initial Message the device sends after DTR assertion / port open,
+    // then drain it so it doesn't collide with the first command ACK.
+    Sleep(300);
+    {
+        DWORD   drainErrors  = 0;
+        COMSTAT drainStat    = {};
+        ClearCommError(hPort, &drainErrors, &drainStat);
+        if (drainStat.cbInQue > 0)
+        {
+            std::cout << "  [Measure] Draining " << drainStat.cbInQue << " bytes (Initial Message)" << std::endl;
+            std::vector<uint8_t> drain(drainStat.cbInQue);
+            DWORD bytesRead = 0;
+            ReadFile(hPort, drain.data(), drainStat.cbInQue, &bytesRead, NULL);
+        }
+        PurgeComm(hPort, PURGE_RXCLEAR);
+    }
+
     // --- Configuration sequence (replicating IRP capture) ---
 
     // 1. Status/version query: &` 000

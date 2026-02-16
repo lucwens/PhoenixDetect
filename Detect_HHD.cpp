@@ -210,14 +210,12 @@ namespace
             if (memcmp(&buffer[i + 15], INIT_TRAILER, sizeof(INIT_TRAILER)) != 0)
                 continue;
 
-            // Valid Initial Message found — extract serial number (bytes 5-12, MSB first)
-            std::stringstream ss;
-            ss << std::hex << std::uppercase << std::setfill('0');
+            // Valid Initial Message found — extract serial number (bytes 5-12)
+            serialNumber.clear();
             for (int j = 0; j < INIT_SERIAL_LENGTH; j++)
             {
-                ss << std::setw(2) << (int)buffer[i + INIT_SERIAL_OFFSET + j];
+                serialNumber += static_cast<char>(buffer[i + INIT_SERIAL_OFFSET + j]);
             }
-            serialNumber = ss.str();
 
             std::cout << "  [HHD] Initial Message received — Serial Number: " << serialNumber << std::endl;
             return true;

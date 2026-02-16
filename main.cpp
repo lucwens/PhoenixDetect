@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <cctype>
 #include <conio.h>
+#include <fstream>
 
 // VisualEyez Configuration
 // Based on logs: 2,500,000 baud, 8 data bits, 1 stop bit, No parity.
@@ -234,7 +235,8 @@ int main()
     HANDLE                  hPort   = INVALID_HANDLE_VALUE;
     HHD_MeasurementSession *session = nullptr;
     std::string             detectedPort;
-    DWORD                   detectedBaud = 0;
+    DWORD                   detectedBaud   = 0;
+    std::string             detectedSerial;
 
     while (true)
     {
@@ -264,8 +266,9 @@ int main()
                         if (!result.serialNumber.empty())
                             std::cout << "  Serial: " << result.serialNumber;
                         std::cout << "  Baud: " << result.detectedBaudRate << std::endl;
-                        detectedPort = result.portName;
-                        detectedBaud = result.detectedBaudRate;
+                        detectedPort   = result.portName;
+                        detectedBaud   = result.detectedBaudRate;
+                        detectedSerial = result.serialNumber;
                     }
                 }
                 std::cout << "--- Scan complete ---\n" << std::endl;
@@ -294,20 +297,31 @@ int main()
                     continue;
                 }
 
-                // Configure baud rate to match detected device
+                // Configure port to match detection settings (baud, 8N1, handshake)
                 DCB dcb       = {};
                 dcb.DCBlength = sizeof(dcb);
                 GetCommState(hPort, &dcb);
-                dcb.BaudRate = detectedBaud;
-                dcb.ByteSize = 8;
-                dcb.StopBits = ONESTOPBIT;
-                dcb.Parity   = NOPARITY;
+                dcb.BaudRate          = detectedBaud;
+                dcb.ByteSize          = 8;
+                dcb.StopBits          = ONESTOPBIT;
+                dcb.Parity            = NOPARITY;
+                dcb.fDtrControl       = DTR_CONTROL_ENABLE;
+                dcb.fOutxCtsFlow      = TRUE;
+                dcb.fOutxDsrFlow      = TRUE;
+                dcb.fDsrSensitivity   = TRUE;
+                dcb.fTXContinueOnXoff = TRUE;
+                dcb.XonLim            = (detectedBaud == 2000000) ? 22 : 82;
+                dcb.XoffLim           = 0;
                 SetCommState(hPort, &dcb);
+
+                // Assert control lines (matches detection sequence)
+                EscapeCommFunction(hPort, SETRTS);
+                EscapeCommFunction(hPort, SETDTR);
 
                 // All markers (LED 1-64) on TCM 1 and TCM 2, 1 flash each
                 std::vector<HHD_MarkerEntry> markers;
                 for (uint8_t tcm = 1; tcm <= 2; ++tcm)
-                    for (uint8_t led = 1; led <= 64; ++led)
+                    for (uint8_t led = 1; led <= 3; ++led)
                         markers.push_back({tcm, led, 1});
 
                 std::cout << "Starting measurement on " << detectedPort << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
@@ -355,6 +369,21 @@ int main()
                     CloseHandle(hPort);
                     hPort = INVALID_HANDLE_VALUE;
                 }
+
+                // Save detection settings to ./Settings/Detect.json
+                CreateDirectoryA("Settings", NULL);
+                std::ofstream ofs("Settings/Detect.json");
+                if (ofs.is_open())
+                {
+                    ofs << "{\n";
+                    ofs << "  \"portName\": \"" << detectedPort << "\",\n";
+                    ofs << "  \"baudRate\": " << detectedBaud << ",\n";
+                    ofs << "  \"serialNumber\": \"" << detectedSerial << "\"\n";
+                    ofs << "}\n";
+                    ofs.close();
+                    std::cout << "Settings saved to Settings/Detect.json" << std::endl;
+                }
+
                 break;
             }
         }
