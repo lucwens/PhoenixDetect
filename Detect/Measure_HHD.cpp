@@ -1,5 +1,6 @@
 #include "Measure_HHD.h"
 #include <algorithm>
+#include <iomanip>
 #include <iostream>
 #include <cstring>
 #include <map>
@@ -679,8 +680,10 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     // Per-marker statistics keyed by (tcmId << 8 | ledId)
     struct ProbeStats
     {
-        int framesTotal = 0;
-        int framesValid = 0; // coordStatus == 0
+        int framesTotal   = 0;
+        int framesValid   = 0; // coordStatus==0 AND at least one eye has signal
+        int framesAllLow  = 0; // all three eyes report signal low
+        int framesCoordOk = 0; // coordStatus==0 (regardless of signal)
     };
     std::map<uint16_t, ProbeStats> stats;
 
@@ -696,7 +699,19 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
                 uint16_t key = (static_cast<uint16_t>(s.tcmId) << 8) | s.ledId;
                 auto    &st  = stats[key];
                 st.framesTotal++;
+
                 if (s.coordStatus == 0)
+                    st.framesCoordOk++;
+
+                bool allEyesLow = (s.rightEyeSignal == 1) &&
+                                  (s.centerEyeSignal == 1) &&
+                                  (s.leftEyeSignal == 1);
+                if (allEyesLow)
+                    st.framesAllLow++;
+
+                // A sample is "valid" only if coordinates are OK AND
+                // at least one camera eye actually saw the marker.
+                if (s.coordStatus == 0 && !allEyesLow)
                     st.framesValid++;
             }
             Sleep(5);
@@ -708,28 +723,45 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     session = nullptr;
 
     // --- Classify markers ---
-    // Group by TCM, then filter by detection threshold
+    // Group by TCM, then filter by detection threshold.
+    // A marker is considered "present" if a sufficient fraction of eval
+    // frames had coordStatus==0 AND at least one camera eye saw the signal.
     std::map<uint8_t, std::vector<HHD_DetectedMarker>> tcmMarkers;
     int totalDetected = 0;
 
+    // Diagnostic: print per-marker stats
+    std::cout << "[ConfigDetect] Per-marker evaluation results:" << std::endl;
     for (const auto &[key, st] : stats)
     {
         uint8_t tcm = static_cast<uint8_t>(key >> 8);
         uint8_t led = static_cast<uint8_t>(key & 0xFF);
 
+        double validRate   = (st.framesTotal > 0) ? static_cast<double>(st.framesValid) / st.framesTotal : 0.0;
+        double allLowRate  = (st.framesTotal > 0) ? static_cast<double>(st.framesAllLow) / st.framesTotal : 0.0;
+
+        // Only print markers that have some valid frames (reduce noise)
+        if (st.framesValid > 0 || st.framesAllLow < st.framesTotal)
+        {
+            std::cout << "  TCM" << (int)tcm << " LED" << std::setw(2) << (int)led
+                      << "  total=" << st.framesTotal
+                      << "  valid=" << st.framesValid
+                      << "  coordOk=" << st.framesCoordOk
+                      << "  allEyesLow=" << st.framesAllLow
+                      << "  rate=" << std::fixed << std::setprecision(0) << (validRate * 100) << "%"
+                      << std::endl;
+        }
+
         if (st.framesTotal < options.minFrames)
-            continue; // not enough data
+            continue;
 
-        double rate = static_cast<double>(st.framesValid) / st.framesTotal;
-
-        if (rate >= options.detectionThreshold)
+        if (validRate >= options.detectionThreshold)
         {
             HHD_DetectedMarker dm = {};
             dm.tcmId              = tcm;
             dm.ledId              = led;
             dm.framesDetected     = st.framesValid;
             dm.framesTotal        = st.framesTotal;
-            dm.detectionRate      = rate;
+            dm.detectionRate      = validRate;
             tcmMarkers[tcm].push_back(dm);
             totalDetected++;
         }

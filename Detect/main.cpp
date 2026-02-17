@@ -868,6 +868,7 @@ int main(int argc, char *argv[])
             // 'q' — quit
             else if (ch == 'q' || ch == 'Q')
             {
+                std::cout << "SHUTTING DOWN " << std::endl;
                 cycling = false;
                 if (session)
                     stopCurrentMeasurement();
