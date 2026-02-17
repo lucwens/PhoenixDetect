@@ -8,12 +8,14 @@
   </Folder>
   <Folder Name="/Doc/">
     <File Path="Doc/Cheat sheet.md" />
+    <File Path="Doc/configdetect.md" />
     <File Path="Doc/MeasureFailure.md" />
     <File Path="Doc/OnlineUserManual.pdf" />
     <File Path="Doc/PTI LOW LEVEL CONTROL KIT FEB 2022 - CONFIDENTIAL.PDF" />
     <File Path="Doc/QuickStartGuide.pdf" />
     <File Path="Doc/runloop.md" />
     <File Path="Doc/VZDaq_Manual_V200.pdf" />
+    <File Path="OperationalLimits.md" />
     <File Path="README.md" />
   </Folder>
   <Project Path="D:/Phoenix/ConvertToJson/ConvertToJson.vcxproj" Id="b2e391d7-f46f-4024-9186-3f401a7936ea" />

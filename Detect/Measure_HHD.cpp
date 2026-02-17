@@ -270,6 +270,208 @@ struct HHD_MeasurementSession
 };
 
 // --------------------------------------------------------------------------
+// Measurement Setup Validation
+// --------------------------------------------------------------------------
+
+std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
+    int frequencyHz,
+    const std::vector<HHD_MarkerEntry> &markers,
+    int sot)
+{
+    std::vector<HHD_ValidationIssue> issues;
+
+    auto addError = [&](const std::string &msg)
+    { issues.push_back({HHD_IssueSeverity::Error, msg}); };
+    auto addWarning = [&](const std::string &msg)
+    { issues.push_back({HHD_IssueSeverity::Warning, msg}); };
+
+    // --- Basic parameter validation ---
+
+    if (markers.empty())
+        addError("No markers specified.");
+
+    if (frequencyHz < 1)
+        addError("Frequency " + std::to_string(frequencyHz) + " Hz is below minimum (1 Hz).");
+    else if (frequencyHz > 4600)
+        addError("Frequency " + std::to_string(frequencyHz) + " Hz exceeds maximum (4600 Hz).");
+
+    if (sot < 2 || sot > 15)
+        addError("SOT " + std::to_string(sot) + " is out of range (2-15).");
+
+    // --- Per-marker validation ---
+
+    uint32_t totalFlashes       = 0;
+    int      markerCount        = static_cast<int>(markers.size());
+    // Per-TCM bookkeeping: count of (LEDID,#flash) pairs and set of LED IDs
+    std::map<uint8_t, int>              pairsPerTcm;
+    std::map<uint8_t, std::vector<int>> ledsPerTcm;
+
+    for (int i = 0; i < markerCount; ++i)
+    {
+        const auto &m   = markers[i];
+        std::string loc = "Marker[" + std::to_string(i) + "] (TCM " +
+                          std::to_string(m.tcmId) + ", LED " + std::to_string(m.ledId) + "): ";
+
+        if (m.tcmId < 1 || m.tcmId > 8)
+            addError(loc + "TCM ID out of range (1-8).");
+
+        if (m.ledId < 1 || m.ledId > 64)
+            addError(loc + "LED ID out of range (1-64).");
+
+        if (m.flashCount < 1)
+            addError(loc + "flash count is 0 (minimum 1).");
+
+        totalFlashes += m.flashCount;
+        pairsPerTcm[m.tcmId]++;
+        ledsPerTcm[m.tcmId].push_back(m.ledId);
+    }
+
+    // --- Total marker capacity ---
+
+    if (markerCount > 512)
+        addError("Total marker count " + std::to_string(markerCount) +
+                 " exceeds system maximum (512).");
+
+    // --- TFS memory constraints ---
+
+    // Max 64 (LEDID, #flash) pairs per TCMID
+    for (const auto &[tcm, count] : pairsPerTcm)
+    {
+        if (count > 64)
+            addError("TCM " + std::to_string(tcm) + " has " + std::to_string(count) +
+                     " marker entries in the TFS (maximum 64 per TCM).");
+    }
+
+    // Max 64 TCMID changes while traversing the TFS (restart counts as a change).
+    // A change occurs whenever consecutive entries differ in tcmId, plus the
+    // wrap-around from last back to first entry counts as one more change.
+    if (markerCount > 0)
+    {
+        int tcmChanges = 1; // entering the first TCMID counts as the initial change
+        for (int i = 1; i < markerCount; ++i)
+        {
+            if (markers[i].tcmId != markers[i - 1].tcmId)
+                tcmChanges++;
+        }
+        // Restart: wrap from last entry back to first
+        if (markers.back().tcmId != markers.front().tcmId)
+            tcmChanges++;
+
+        if (tcmChanges > 64)
+            addError("TFS contains " + std::to_string(tcmChanges) +
+                     " TCM ID transitions (maximum 64, including restart).");
+    }
+
+    // --- LED ID gap detection (SIK/Octopus requirement) ---
+    // For SIK/Octopus markers all LED IDs 1..N under a TCM must be present
+    // with no gaps.  Since we cannot distinguish marker types, report as warning.
+
+    for (const auto &[tcm, leds] : ledsPerTcm)
+    {
+        std::vector<int> sorted = leds;
+        std::sort(sorted.begin(), sorted.end());
+        // Remove duplicates for gap analysis
+        sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+
+        int maxLed = sorted.back();
+        if (static_cast<int>(sorted.size()) < maxLed)
+        {
+            // Find the actual missing IDs for a useful message
+            std::vector<int> missing;
+            size_t           si = 0;
+            for (int id = 1; id <= maxLed && missing.size() <= 5; ++id)
+            {
+                if (si < sorted.size() && sorted[si] == id)
+                    si++;
+                else
+                    missing.push_back(id);
+            }
+            std::string ids;
+            for (size_t j = 0; j < missing.size(); ++j)
+            {
+                if (j > 0) ids += ", ";
+                ids += std::to_string(missing[j]);
+            }
+            if (missing.size() < static_cast<size_t>(maxLed - static_cast<int>(sorted.size())))
+                ids += ", ...";
+
+            addWarning("TCM " + std::to_string(tcm) + " has gaps in LED IDs (missing: " +
+                       ids + "). SIK/Octopus markers require contiguous IDs from 1.");
+        }
+    }
+
+    // --- Timing validation ---
+
+    if (frequencyHz >= 1 && totalFlashes > 0)
+    {
+        uint32_t framePeriod_us  = 1000000 / static_cast<uint32_t>(frequencyHz);
+        uint32_t activeTime_us   = totalFlashes * DEFAULT_SAMPLING_PERIOD_US;
+
+        if (activeTime_us > framePeriod_us)
+        {
+            double maxFps = 1000000.0 / activeTime_us;
+            addError("Requested " + std::to_string(frequencyHz) + " Hz but " +
+                     std::to_string(totalFlashes) + " flashes/frame at " +
+                     std::to_string(DEFAULT_SAMPLING_PERIOD_US) + " us sampling period "
+                     "require at least " + std::to_string(activeTime_us) +
+                     " us per frame. Maximum achievable rate is ~" +
+                     std::to_string(static_cast<int>(maxFps)) + " Hz.");
+        }
+        else if (activeTime_us == framePeriod_us)
+        {
+            addWarning("Requested " + std::to_string(frequencyHz) +
+                       " Hz leaves zero intermission time. "
+                       "The system is at its absolute timing limit and capture may be unreliable.");
+        }
+    }
+
+    // --- SOT-based effective frequency check ---
+    // Per-target max frequency is bounded by SOT.  Known reference points:
+    //   SOT 2 → 13020 Hz,  SOT 15 → 2441 Hz
+    // Approximate: maxTargetHz ≈ 26040 / SOT  (fits the reference points)
+    // Effective max frame rate = maxTargetHz / totalFlashes
+
+    if (sot >= 2 && sot <= 15 && totalFlashes > 0 && frequencyHz >= 1)
+    {
+        double maxTargetHz = 26040.0 / sot;
+        double maxFps      = maxTargetHz / totalFlashes;
+
+        if (frequencyHz > static_cast<int>(maxFps))
+        {
+            addWarning("At SOT=" + std::to_string(sot) + " the per-target limit is ~" +
+                       std::to_string(static_cast<int>(maxTargetHz)) + " Hz. With " +
+                       std::to_string(totalFlashes) + " flashes/frame the effective "
+                       "maximum is ~" + std::to_string(static_cast<int>(maxFps)) +
+                       " Hz, but " + std::to_string(frequencyHz) + " Hz was requested. "
+                       "Samples may be skipped.");
+        }
+    }
+
+    // --- LED overheating risk ---
+
+    if (frequencyHz >= 120)
+        addWarning("Frequency " + std::to_string(frequencyHz) +
+                   " Hz >= 120 Hz. LED markers may overheat and sustain damage "
+                   "during extended captures.");
+
+    // --- High flash count heat warning ---
+
+    for (int i = 0; i < markerCount; ++i)
+    {
+        if (markers[i].flashCount > 10)
+        {
+            addWarning("Marker[" + std::to_string(i) + "] (TCM " +
+                       std::to_string(markers[i].tcmId) + ", LED " +
+                       std::to_string(markers[i].ledId) + "): flash count " +
+                       std::to_string(markers[i].flashCount) +
+                       " is high. Increased LED duty cycle raises heat load.");
+        }
+    }
+
+    return issues;
+}
+
+// --------------------------------------------------------------------------
 // Public API
 // --------------------------------------------------------------------------
 

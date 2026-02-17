@@ -41,6 +41,37 @@ struct HHD_MeasurementSample
     uint8_t leftEyeStatus;    // CCCC: 0 = no anomaly
 };
 
+// ---------------------------------------------------------------------------
+// Measurement Setup Validation
+// ---------------------------------------------------------------------------
+
+enum class HHD_IssueSeverity { Error, Warning };
+
+struct HHD_ValidationIssue
+{
+    HHD_IssueSeverity severity;
+    std::string       message;
+};
+
+// Validate measurement parameters against hardware operational limits
+// before calling StartMeasurement.
+//
+// Checks the requested frequency, marker configuration, and TFS structure
+// against the limits documented in OperationalLimits.md.  Issues classified
+// as Error will cause the measurement to fail or produce incorrect data.
+// Issues classified as Warning indicate degraded performance or hardware risk.
+//
+// Parameters:
+//   frequencyHz — desired measurement rate in Hz
+//   markers     — TFS entries (same as StartMeasurement)
+//   sot         — Sample Operation Time (2–15), default 3 (matches StartMeasurement)
+//
+// Returns a (possibly empty) list of issues found.
+std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
+    int frequencyHz,
+    const std::vector<HHD_MarkerEntry> &markers,
+    int sot = 3);
+
 // Opaque handle for an active measurement session.
 // Allocated by StartMeasurement, freed by StopMeasurement.
 struct HHD_MeasurementSession;
