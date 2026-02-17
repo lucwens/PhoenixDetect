@@ -90,3 +90,64 @@ int FetchMeasurements(HHD_MeasurementSession *session, std::vector<HHD_Measureme
 //
 // Returns true if the stop was acknowledged by the tracker.
 bool StopMeasurement(HHD_MeasurementSession *session);
+
+// ---------------------------------------------------------------------------
+// Configuration Detection — automatic marker & TCM discovery
+// ---------------------------------------------------------------------------
+
+// Result for a single detected marker
+struct HHD_DetectedMarker
+{
+    uint8_t tcmId;          // TCM module ID (1-8)
+    uint8_t ledId;          // LED marker ID (1-64)
+    int     framesDetected; // frames where coordStatus == 0
+    int     framesTotal;    // total frames captured (after warm-up)
+    double  detectionRate;  // framesDetected / framesTotal (0.0–1.0)
+};
+
+// Result for a detected TCM
+struct HHD_DetectedTCM
+{
+    uint8_t                         tcmId;   // TCM module ID (1-8)
+    std::vector<HHD_DetectedMarker> markers; // active LEDs on this TCM
+};
+
+// Full configuration detection result
+struct HHD_ConfigDetectResult
+{
+    bool                             success;
+    std::vector<HHD_DetectedTCM>     tcms;       // connected TCMs with their markers
+    std::vector<HHD_MarkerEntry>     markerList;  // flattened list ready for StartMeasurement
+    std::string                      summary;     // human-readable summary
+};
+
+// Options for the detection scan
+struct HHD_ConfigDetectOptions
+{
+    int    maxTcmId            = 8;    // scan TCMs 1..maxTcmId
+    int    maxLedId            = 16;   // scan LEDs 1..maxLedId per TCM
+    int    probeFreqHz         = 10;   // measurement frequency during probe
+    int    warmupMs            = 2000; // discard data for this long at the start (tracker settling)
+    int    evalMs              = 1500; // collect evaluation data for this long after warm-up
+    int    minFrames           = 3;    // minimum eval frames required for a decision
+    double detectionThreshold  = 0.5;  // fraction of eval frames with coordStatus==0 to consider present
+};
+
+// Detect connected TCMs and active LED markers by running a probe measurement.
+//
+// Programs all candidate markers (TCMs 1..maxTcmId, LEDs 1..maxLedId) into a
+// single TFS, starts a measurement, discards the first warmupMs of data (the
+// tracker needs time to adjust auto-exposure), then evaluates evalMs of data
+// to classify each marker as present or absent.
+//
+// The caller must NOT have an active measurement session on the same port.
+//
+// Parameters:
+//   hPort   — open COM port handle (caller retains ownership)
+//   options — scan configuration (optional, sensible defaults)
+//
+// Returns:
+//   HHD_ConfigDetectResult with connected TCMs and their active markers.
+//   result.markerList is ready to pass directly to StartMeasurement().
+HHD_ConfigDetectResult ConfigDetect(HANDLE hPort,
+                                     const HHD_ConfigDetectOptions &options = {});

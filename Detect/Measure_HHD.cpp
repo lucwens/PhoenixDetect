@@ -1,6 +1,9 @@
 #include "Measure_HHD.h"
+#include <algorithm>
 #include <iostream>
 #include <cstring>
+#include <map>
+#include <sstream>
 
 // --------------------------------------------------------------------------
 // Internal helpers and constants
@@ -625,4 +628,156 @@ bool StopMeasurement(HHD_MeasurementSession *session)
     delete session;
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// ConfigDetect — automatic marker & TCM discovery via probe measurement
+// ---------------------------------------------------------------------------
+
+HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions &options)
+{
+    HHD_ConfigDetectResult result = {};
+    result.success                = false;
+
+    int maxTcm = (options.maxTcmId >= 1 && options.maxTcmId <= 8) ? options.maxTcmId : 8;
+    int maxLed = (options.maxLedId >= 1 && options.maxLedId <= 64) ? options.maxLedId : 16;
+
+    // Build candidate marker list: all combinations of TCM 1..maxTcm × LED 1..maxLed
+    std::vector<HHD_MarkerEntry> candidates;
+    for (int tcm = 1; tcm <= maxTcm; tcm++)
+        for (int led = 1; led <= maxLed; led++)
+            candidates.push_back({static_cast<uint8_t>(tcm), static_cast<uint8_t>(led), 1});
+
+    std::cout << "[ConfigDetect] Probing " << candidates.size() << " candidate markers"
+              << " (TCM 1-" << maxTcm << ", LED 1-" << maxLed << ")" << std::endl;
+
+    // Start a probe measurement session
+    HHD_MeasurementSession *session = StartMeasurement(hPort, options.probeFreqHz, candidates);
+    if (!session)
+    {
+        result.summary = "Failed to start probe measurement";
+        std::cerr << "[ConfigDetect] " << result.summary << std::endl;
+        return result;
+    }
+
+    // --- Warm-up phase: discard data while the tracker adjusts auto-exposure ---
+    std::cout << "[ConfigDetect] Warm-up: discarding data for " << options.warmupMs << "ms" << std::endl;
+    {
+        ULONGLONG warmupStart = GetTickCount64();
+        std::vector<HHD_MeasurementSample> discarded;
+        while ((GetTickCount64() - warmupStart) < static_cast<ULONGLONG>(options.warmupMs))
+        {
+            discarded.clear();
+            FetchMeasurements(session, discarded);
+            Sleep(10);
+        }
+    }
+
+    // --- Evaluation phase: collect data and classify markers ---
+    std::cout << "[ConfigDetect] Evaluating for " << options.evalMs << "ms" << std::endl;
+
+    // Per-marker statistics keyed by (tcmId << 8 | ledId)
+    struct ProbeStats
+    {
+        int framesTotal = 0;
+        int framesValid = 0; // coordStatus == 0
+    };
+    std::map<uint16_t, ProbeStats> stats;
+
+    {
+        ULONGLONG evalStart = GetTickCount64();
+        std::vector<HHD_MeasurementSample> samples;
+        while ((GetTickCount64() - evalStart) < static_cast<ULONGLONG>(options.evalMs))
+        {
+            samples.clear();
+            FetchMeasurements(session, samples);
+            for (const auto &s : samples)
+            {
+                uint16_t key = (static_cast<uint16_t>(s.tcmId) << 8) | s.ledId;
+                auto    &st  = stats[key];
+                st.framesTotal++;
+                if (s.coordStatus == 0)
+                    st.framesValid++;
+            }
+            Sleep(5);
+        }
+    }
+
+    // Stop the probe measurement
+    StopMeasurement(session);
+    session = nullptr;
+
+    // --- Classify markers ---
+    // Group by TCM, then filter by detection threshold
+    std::map<uint8_t, std::vector<HHD_DetectedMarker>> tcmMarkers;
+    int totalDetected = 0;
+
+    for (const auto &[key, st] : stats)
+    {
+        uint8_t tcm = static_cast<uint8_t>(key >> 8);
+        uint8_t led = static_cast<uint8_t>(key & 0xFF);
+
+        if (st.framesTotal < options.minFrames)
+            continue; // not enough data
+
+        double rate = static_cast<double>(st.framesValid) / st.framesTotal;
+
+        if (rate >= options.detectionThreshold)
+        {
+            HHD_DetectedMarker dm = {};
+            dm.tcmId              = tcm;
+            dm.ledId              = led;
+            dm.framesDetected     = st.framesValid;
+            dm.framesTotal        = st.framesTotal;
+            dm.detectionRate      = rate;
+            tcmMarkers[tcm].push_back(dm);
+            totalDetected++;
+        }
+    }
+
+    // Build result
+    result.success = true;
+    std::ostringstream summaryStream;
+    summaryStream << "Found " << tcmMarkers.size() << " TCM(s): ";
+
+    bool first = true;
+    for (auto &[tcmId, markers] : tcmMarkers)
+    {
+        // Sort markers by LED ID
+        std::sort(markers.begin(), markers.end(),
+                  [](const HHD_DetectedMarker &a, const HHD_DetectedMarker &b) { return a.ledId < b.ledId; });
+
+        HHD_DetectedTCM dtcm;
+        dtcm.tcmId   = tcmId;
+        dtcm.markers = markers;
+        result.tcms.push_back(dtcm);
+
+        // Add to flat marker list
+        for (const auto &dm : markers)
+            result.markerList.push_back({dm.tcmId, dm.ledId, 1});
+
+        // Build summary
+        if (!first)
+            summaryStream << ", ";
+        first = false;
+        summaryStream << "TCM" << (int)tcmId << " (LED";
+        if (markers.size() == 1)
+        {
+            summaryStream << " " << (int)markers[0].ledId;
+        }
+        else
+        {
+            summaryStream << "s";
+            for (size_t i = 0; i < markers.size(); i++)
+            {
+                summaryStream << (i == 0 ? " " : ",") << (int)markers[i].ledId;
+            }
+        }
+        summaryStream << ")";
+    }
+    summaryStream << " — " << totalDetected << " marker(s) total";
+    result.summary = summaryStream.str();
+
+    std::cout << "[ConfigDetect] " << result.summary << std::endl;
+    return result;
 }

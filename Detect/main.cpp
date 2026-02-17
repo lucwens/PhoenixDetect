@@ -65,6 +65,99 @@ struct DetectedTracker
     std::string serialNumber;
 };
 
+// Save detected marker configuration to Settings/MarkerConfig.json
+void SaveMarkerConfig(const HHD_ConfigDetectResult &config)
+{
+    CreateDirectoryA("Settings", NULL);
+    std::ofstream ofs("Settings/MarkerConfig.json");
+    if (!ofs.is_open())
+        return;
+
+    ofs << "{\n  \"tcms\": [\n";
+    for (size_t t = 0; t < config.tcms.size(); t++)
+    {
+        const auto &tcm = config.tcms[t];
+        ofs << "    {\n      \"tcmId\": " << (int)tcm.tcmId << ",\n      \"markers\": [\n";
+        for (size_t m = 0; m < tcm.markers.size(); m++)
+        {
+            const auto &mk = tcm.markers[m];
+            ofs << "        { \"ledId\": " << (int)mk.ledId
+                << ", \"detectionRate\": " << std::fixed << std::setprecision(2) << mk.detectionRate << " }";
+            if (m + 1 < tcm.markers.size())
+                ofs << ",";
+            ofs << "\n";
+        }
+        ofs << "      ]\n    }";
+        if (t + 1 < config.tcms.size())
+            ofs << ",";
+        ofs << "\n";
+    }
+    ofs << "  ],\n  \"markerList\": [\n";
+    for (size_t i = 0; i < config.markerList.size(); i++)
+    {
+        const auto &m = config.markerList[i];
+        ofs << "    { \"tcmId\": " << (int)m.tcmId << ", \"ledId\": " << (int)m.ledId
+            << ", \"flashCount\": " << (int)m.flashCount << " }";
+        if (i + 1 < config.markerList.size())
+            ofs << ",";
+        ofs << "\n";
+    }
+    ofs << "  ]\n}\n";
+    ofs.close();
+    std::cout << "Marker config saved to Settings/MarkerConfig.json" << std::endl;
+}
+
+// Load marker configuration from Settings/MarkerConfig.json
+// Returns true if at least one marker was loaded.
+bool LoadMarkerConfig(std::vector<HHD_MarkerEntry> &markers)
+{
+    markers.clear();
+    std::ifstream ifs("Settings/MarkerConfig.json");
+    if (!ifs.is_open())
+        return false;
+
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+
+    // Parse markerList entries: { "tcmId": N, "ledId": N, "flashCount": N }
+    std::string search = "\"markerList\"";
+    size_t      mlPos  = content.find(search);
+    if (mlPos == std::string::npos)
+        return false;
+
+    // Find each marker object after markerList
+    size_t pos = mlPos;
+    while ((pos = content.find('{', pos)) != std::string::npos)
+    {
+        size_t blockEnd = content.find('}', pos);
+        if (blockEnd == std::string::npos)
+            break;
+
+        std::string block = content.substr(pos, blockEnd - pos + 1);
+
+        // Extract tcmId
+        auto extractInt = [&](const std::string &key) -> int
+        {
+            std::string k   = "\"" + key + "\": ";
+            size_t      kp  = block.find(k);
+            if (kp == std::string::npos)
+                return -1;
+            return std::stoi(block.substr(kp + k.size()));
+        };
+
+        int tcm = extractInt("tcmId");
+        int led = extractInt("ledId");
+        int fc  = extractInt("flashCount");
+
+        if (tcm >= 1 && tcm <= 8 && led >= 1 && led <= 64 && fc >= 1)
+            markers.push_back({static_cast<uint8_t>(tcm), static_cast<uint8_t>(led), static_cast<uint8_t>(fc)});
+
+        pos = blockEnd + 1;
+    }
+
+    return !markers.empty();
+}
+
 // Save all detected trackers to Settings/Detect.json
 void SaveDetectionSettings(const std::vector<DetectedTracker> &trackers)
 {
@@ -465,6 +558,7 @@ int main(int argc, char *argv[])
     HANDLE                       hPort   = INVALID_HANDLE_VALUE;
     HHD_MeasurementSession      *session = nullptr;
     std::vector<DetectedTracker> detectedTrackers;
+    std::vector<HHD_MarkerEntry> activeMarkers; // discovered or loaded marker config
 
     // Load saved detection settings from previous session
     if (LoadDetectionSettings(detectedTrackers))
@@ -481,11 +575,21 @@ int main(int argc, char *argv[])
         std::cout << std::endl;
     }
 
+    // Load saved marker configuration
+    if (LoadMarkerConfig(activeMarkers))
+    {
+        std::cout << "Loaded saved marker config (" << activeMarkers.size() << " markers):";
+        for (const auto &m : activeMarkers)
+            std::cout << " TCM" << (int)m.tcmId << "/LED" << (int)m.ledId;
+        std::cout << std::endl << std::endl;
+    }
+
     const DWORD MEASURE_DURATION_MS = 3000;
 
     std::cout << "VisualEyez Tracker Interactive Console" << std::endl;
     std::cout << "==========================================" << std::endl;
     std::cout << "  h - Detect HHD on COM1-COM16" << std::endl;
+    std::cout << "  d - Detect marker configuration (auto-scan connected TCMs and LEDs)" << std::endl;
     std::cout << "  s - Start measurement (10 Hz, auto-stops after " << (MEASURE_DURATION_MS / 1000) << "s)" << std::endl;
     std::cout << "  c - Cycle: start/stop every " << (MEASURE_DURATION_MS / 1000) << "s continuously" << std::endl;
     std::cout << "  t - Stop measurement (also stops cycling)" << std::endl;
@@ -500,6 +604,10 @@ int main(int argc, char *argv[])
             std::cout << detectedTrackers[i].portName;
         }
         std::cout << "]" << std::endl;
+    }
+    if (!activeMarkers.empty())
+    {
+        std::cout << "  [Markers: " << activeMarkers.size() << " configured]" << std::endl;
     }
     std::cout << std::endl;
     ULONGLONG                          measureStartTick    = 0;
@@ -543,10 +651,19 @@ int main(int argc, char *argv[])
         EscapeCommFunction(hPort, SETRTS);
         EscapeCommFunction(hPort, SETDTR);
 
+        // Use discovered markers if available, otherwise fall back to defaults
         std::vector<HHD_MarkerEntry> markers;
-        for (uint8_t tcm = 1; tcm <= 2; ++tcm)
-            for (uint8_t led = 1; led <= 3; ++led)
-                markers.push_back({tcm, led, 1});
+        if (!activeMarkers.empty())
+        {
+            markers = activeMarkers;
+        }
+        else
+        {
+            // Default: TCM 1-2, LED 1-3
+            for (uint8_t tcm = 1; tcm <= 2; ++tcm)
+                for (uint8_t led = 1; led <= 3; ++led)
+                    markers.push_back({tcm, led, 1});
+        }
 
         std::cout << "Starting measurement on " << tracker.portName << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
 
@@ -621,6 +738,72 @@ int main(int argc, char *argv[])
                 if (!detectedTrackers.empty())
                     SaveDetectionSettings(detectedTrackers);
                 std::cout << "--- Scan complete: " << detectedTrackers.size() << " tracker(s) found ---\n" << std::endl;
+            }
+
+            // 'd' — detect marker configuration (auto-scan)
+            else if (ch == 'd' || ch == 'D')
+            {
+                if (session)
+                {
+                    std::cout << "Measurement already running. Press 't' to stop first." << std::endl;
+                    continue;
+                }
+                if (detectedTrackers.empty())
+                {
+                    std::cout << "No device detected yet. Press 'h' to scan first." << std::endl;
+                    continue;
+                }
+
+                const auto &tracker  = detectedTrackers[0];
+                std::string portPath = "\\\\.\\" + tracker.portName;
+                HANDLE      hProbe   = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hProbe == INVALID_HANDLE_VALUE)
+                {
+                    std::cout << "Failed to open " << tracker.portName << std::endl;
+                    continue;
+                }
+
+                // Configure port for the probe
+                DCB dcb       = {};
+                dcb.DCBlength = sizeof(dcb);
+                GetCommState(hProbe, &dcb);
+                dcb.BaudRate          = tracker.baudRate;
+                dcb.ByteSize          = 8;
+                dcb.StopBits          = ONESTOPBIT;
+                dcb.Parity            = NOPARITY;
+                dcb.fDtrControl       = DTR_CONTROL_ENABLE;
+                dcb.fOutxCtsFlow      = TRUE;
+                dcb.fOutxDsrFlow      = TRUE;
+                dcb.fDsrSensitivity   = TRUE;
+                dcb.fTXContinueOnXoff = TRUE;
+                dcb.XonLim            = (tracker.baudRate == 2000000) ? 22 : 82;
+                dcb.XoffLim           = 0;
+                SetCommState(hProbe, &dcb);
+                EscapeCommFunction(hProbe, SETRTS);
+                EscapeCommFunction(hProbe, SETDTR);
+
+                std::cout << "\n--- Auto-detecting marker configuration ---" << std::endl;
+
+                HHD_ConfigDetectOptions opts;
+                opts.maxTcmId  = 8;
+                opts.maxLedId  = 16;
+
+                auto config = ConfigDetect(hProbe, opts);
+                CloseHandle(hProbe);
+
+                if (config.success && !config.markerList.empty())
+                {
+                    activeMarkers = config.markerList;
+                    SaveMarkerConfig(config);
+                    std::cout << "--- " << config.summary << " ---\n" << std::endl;
+                }
+                else
+                {
+                    std::cout << "--- No markers detected";
+                    if (!config.summary.empty())
+                        std::cout << ": " << config.summary;
+                    std::cout << " ---\n" << std::endl;
+                }
             }
 
             // 's' — start measurement (single run)
