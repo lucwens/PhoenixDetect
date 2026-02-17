@@ -19,9 +19,12 @@ namespace
     // Timeouts for the command/response cycle
     const int CMD_ACK_TIMEOUT_MS              = 500;  // max wait for ACK after a command
     const int CMD_ACK_POLL_MS                 = 1;    // poll interval while waiting for ACK
+    const int CMD_ACK_MAX_RETRIES             = 10;   // max non-ACK records to skip before giving up
     const int STOP_GAP_MS                     = 1500; // gap between first and second stop command
     const int FETCH_READ_TIMEOUT_MS           = 5;    // short timeout for non-blocking fetch reads
     const int RESET_POLL_MS                   = 10;   // poll interval while waiting for device after reset
+    const int RESET_SILENCE_THRESHOLD_MS      = 300;  // require this much silence after reset before proceeding
+    const int RESET_MIN_BOOT_MS               = 1700; // minimum boot time — VZSoft waits ~1.7s after software reset
 
     // --------------------------------------------------------------------------
     // Build a PTI command buffer
@@ -84,23 +87,50 @@ namespace
             return false;
         }
 
-        // Read the ACK
-        uint8_t ackBuf[ACK_SIZE] = {};
-        DWORD   bytesRead        = 0;
-        if (!ReadFile(hPort, ackBuf, ACK_SIZE, &bytesRead, NULL) || bytesRead < ACK_SIZE)
+        // Read the ACK — if we get stale measurement data instead of the
+        // expected command echo, skip it and retry.  The device may still be
+        // streaming records from a retained TFS after a software reset.
+        for (int ackRetry = 0; ackRetry <= CMD_ACK_MAX_RETRIES; ackRetry++)
         {
-            std::cerr << "  [Measure] ReadFile ACK failed (error " << GetLastError() << ")" << std::endl;
-            return false;
+            uint8_t ackBuf[ACK_SIZE] = {};
+            DWORD   bytesRead        = 0;
+            if (!ReadFile(hPort, ackBuf, ACK_SIZE, &bytesRead, NULL) || bytesRead < ACK_SIZE)
+            {
+                std::cerr << "  [Measure] ReadFile ACK failed (error " << GetLastError() << ")" << std::endl;
+                return false;
+            }
+
+            // Validate: byte 0 should echo the command code
+            if (ackBuf[0] == cmd[1])
+                return true;
+
+            if (ackRetry < CMD_ACK_MAX_RETRIES)
+            {
+                std::cout << "  [Measure] Skipping non-ACK data (got 0x" << std::hex << (int)ackBuf[0] << ", expected 0x" << (int)cmd[1] << std::dec
+                          << "), retry " << (ackRetry + 1) << "/" << CMD_ACK_MAX_RETRIES << std::endl;
+
+                // Wait for the next 19 bytes to arrive
+                errors  = 0;
+                comstat = {};
+                elapsed = 0;
+                while (elapsed < CMD_ACK_TIMEOUT_MS)
+                {
+                    ClearCommError(hPort, &errors, &comstat);
+                    if (comstat.cbInQue >= ACK_SIZE)
+                        break;
+                    Sleep(CMD_ACK_POLL_MS);
+                    elapsed += CMD_ACK_POLL_MS;
+                }
+                if (comstat.cbInQue < ACK_SIZE)
+                {
+                    std::cerr << "  [Measure] ACK timeout after skipping stale data" << std::endl;
+                    return false;
+                }
+            }
         }
 
-        // Validate: byte 0 should echo the command code
-        if (ackBuf[0] != cmd[1])
-        {
-            std::cerr << "  [Measure] ACK mismatch: expected 0x" << std::hex << (int)cmd[1] << " got 0x" << (int)ackBuf[0] << std::dec << std::endl;
-            return false;
-        }
-
-        return true;
+        std::cerr << "  [Measure] ACK not found after " << CMD_ACK_MAX_RETRIES << " retries for command 0x" << std::hex << (int)cmd[1] << std::dec << std::endl;
+        return false;
     }
 
     // --------------------------------------------------------------------------
@@ -178,23 +208,40 @@ namespace
 
     // --------------------------------------------------------------------------
     // Wait for the device to become ready after a software reset.
-    // Polls the RX queue; returns as soon as any data arrives (device is alive)
-    // or when the timeout expires. Drains received data in either case.
+    // The device may stream retained measurement data after rebooting, so we
+    // drain ALL incoming data and wait for a sustained period of silence
+    // before returning.  This prevents stale data from colliding with the
+    // first configuration command ACK.
     // --------------------------------------------------------------------------
     bool WaitForDeviceReady(HANDLE hPort, int timeoutMs)
     {
-        DWORD   errors  = 0;
-        COMSTAT comstat = {};
-        int     elapsed = 0;
+        DWORD   errors   = 0;
+        COMSTAT comstat  = {};
+        int     elapsed  = 0;
+        int     silentMs = 0;
+        bool    sawData  = false;
 
         while (elapsed < timeoutMs)
         {
             ClearCommError(hPort, &errors, &comstat);
             if (comstat.cbInQue > 0)
             {
-                std::cout << "  [Measure] Device ready after " << elapsed << "ms (" << comstat.cbInQue << " bytes received)" << std::endl;
+                if (!sawData)
+                    std::cout << "  [Measure] Device responding after " << elapsed << "ms — draining" << std::endl;
+                sawData = true;
                 PurgeComm(hPort, PURGE_RXCLEAR);
-                return true;
+                silentMs = 0; // reset silence counter — more data may follow
+            }
+            else
+            {
+                silentMs += RESET_POLL_MS;
+                // Require sustained silence AND a minimum boot time
+                if (silentMs >= RESET_SILENCE_THRESHOLD_MS && elapsed >= RESET_MIN_BOOT_MS)
+                {
+                    std::cout << "  [Measure] Device ready after " << elapsed << "ms (" << silentMs << "ms silence)" << std::endl;
+                    PurgeComm(hPort, PURGE_RXCLEAR);
+                    return true;
+                }
             }
             Sleep(RESET_POLL_MS);
             elapsed += RESET_POLL_MS;
@@ -274,6 +321,16 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const st
     }
 
     // --- Configuration sequence (replicating IRP capture) ---
+
+    // 0. Pre-reset STOP: halt any measurement from a previous session.
+    //    The device retains its TFS across software resets, so it may resume
+    //    streaming data immediately after reboot.  Sending &5 first ensures
+    //    the device is idle before we reset.
+    std::cout << "  [Measure] Sending pre-reset STOP (&5)" << std::endl;
+    auto cmdPreStop = BuildCommand('5', '0', '0', '0');
+    SendCommand(hPort, cmdPreStop, /*sendOnly=*/true); // ignore result — device may not be running
+    Sleep(100);
+    PurgeComm(hPort, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
     // 1. Software Reset: &` 000
     //    This command does NOT generate an ACK — the device reboots.
@@ -485,6 +542,52 @@ int FetchMeasurements(HHD_MeasurementSession *session, std::vector<HHD_Measureme
     return newSamples;
 }
 
+// Send STOP (&5) and drain streaming data until the ACK arrives.
+// During active measurement the device pipeline may contain many queued
+// records, so we read in a time-bounded loop rather than using the
+// generic SendCommand retry logic.
+static bool SendStopAndDrain(HANDLE hPort, int timeoutMs)
+{
+    // Drain any data already in the host buffer
+    PurgeComm(hPort, PURGE_RXCLEAR);
+
+    // Send &5
+    auto  cmdStop      = BuildCommand('5', '0', '0', '0');
+    DWORD bytesWritten = 0;
+    if (!WriteFile(hPort, cmdStop.data(), static_cast<DWORD>(cmdStop.size()), &bytesWritten, NULL))
+        return false;
+
+    // Read 19-byte records until we find the ACK or timeout.
+    // Use GetTickCount64 for accurate wall-clock timing — the loop must
+    // not spin forever even when data is flowing continuously.
+    ULONGLONG startTick = GetTickCount64();
+
+    while ((GetTickCount64() - startTick) < static_cast<ULONGLONG>(timeoutMs))
+    {
+        DWORD   errors  = 0;
+        COMSTAT comstat = {};
+        ClearCommError(hPort, &errors, &comstat);
+
+        if (comstat.cbInQue >= ACK_SIZE)
+        {
+            uint8_t buf[ACK_SIZE] = {};
+            DWORD   bytesRead     = 0;
+            if (ReadFile(hPort, buf, ACK_SIZE, &bytesRead, NULL) && bytesRead >= ACK_SIZE)
+            {
+                if (buf[0] == 0x35 && buf[1] == 0x30) // '5' '0' = STOP ACK
+                    return true;
+                // Measurement data — discard and keep reading
+            }
+        }
+        else
+        {
+            Sleep(CMD_ACK_POLL_MS);
+        }
+    }
+
+    return false;
+}
+
 bool StopMeasurement(HHD_MeasurementSession *session)
 {
     if (!session)
@@ -492,7 +595,7 @@ bool StopMeasurement(HHD_MeasurementSession *session)
 
     std::cout << "[Measure] Stopping measurement" << std::endl;
 
-    // Restore longer timeouts for stop command ACK
+    // Restore longer timeouts for the stop phase
     COMMTIMEOUTS timeouts                = {};
     timeouts.ReadIntervalTimeout         = 50;
     timeouts.ReadTotalTimeoutConstant    = CMD_ACK_TIMEOUT_MS;
@@ -501,16 +604,17 @@ bool StopMeasurement(HHD_MeasurementSession *session)
     timeouts.WriteTotalTimeoutMultiplier = 10;
     SetCommTimeouts(session->hPort, &timeouts);
 
-    // Send STOP twice with a gap (matches IRP capture pattern)
-    auto cmdStop = BuildCommand('5', '0', '0', '0');
-
+    // Send STOP and drain streaming data until ACK
     std::cout << "  [Measure] Sending STOP (&5) — attempt 1" << std::endl;
-    bool ack1 = SendCommand(session->hPort, cmdStop);
+    bool ack1 = SendStopAndDrain(session->hPort, 2000);
 
-    Sleep(STOP_GAP_MS);
-
-    std::cout << "  [Measure] Sending STOP (&5) — attempt 2" << std::endl;
-    bool ack2 = SendCommand(session->hPort, cmdStop);
+    if (!ack1)
+    {
+        // Retry after a gap (matches IRP capture pattern)
+        Sleep(STOP_GAP_MS);
+        std::cout << "  [Measure] Sending STOP (&5) — attempt 2" << std::endl;
+        SendStopAndDrain(session->hPort, 2000);
+    }
 
     // Drain any remaining measurement data from the RX buffer
     PurgeComm(session->hPort, PURGE_RXCLEAR);
@@ -520,5 +624,5 @@ bool StopMeasurement(HHD_MeasurementSession *session)
     // Free session
     delete session;
 
-    return ack1 || ack2;
+    return true;
 }

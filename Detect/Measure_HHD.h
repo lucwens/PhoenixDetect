@@ -61,10 +61,10 @@ struct HHD_MeasurementSession;
 //                    The total number of entries (sum of flashCounts) determines
 //                    the frame duration together with the sampling period.
 //   resetTimeoutMs — max time (ms) to wait for the device to become ready after
-//                    software reset. VZSoft waits ~1.7s; default 2000ms.
+//                    software reset. VZSoft waits ~1.7s; default 3000ms.
 //
 // Returns a session handle on success, or nullptr on failure.
-HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int resetTimeoutMs = 2000);
+HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int resetTimeoutMs = 3000);
 
 // Fetch available measurement samples from the serial buffer.
 //

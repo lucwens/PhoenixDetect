@@ -481,11 +481,14 @@ int main(int argc, char *argv[])
         std::cout << std::endl;
     }
 
+    const DWORD MEASURE_DURATION_MS = 3000;
+
     std::cout << "VisualEyez Tracker Interactive Console" << std::endl;
     std::cout << "==========================================" << std::endl;
     std::cout << "  h - Detect HHD on COM1-COM16" << std::endl;
     std::cout << "  s - Start measurement (10 Hz, auto-stops after " << (MEASURE_DURATION_MS / 1000) << "s)" << std::endl;
-    std::cout << "  t - Stop measurement" << std::endl;
+    std::cout << "  c - Cycle: start/stop every " << (MEASURE_DURATION_MS / 1000) << "s continuously" << std::endl;
+    std::cout << "  t - Stop measurement (also stops cycling)" << std::endl;
     std::cout << "  q - Quit" << std::endl;
     if (!detectedTrackers.empty())
     {
@@ -500,9 +503,88 @@ int main(int argc, char *argv[])
     }
     std::cout << std::endl;
     ULONGLONG                          measureStartTick    = 0;
-    const DWORD                        MEASURE_DURATION_MS = 3000;
     std::ofstream                      logFile;
     std::vector<HHD_MeasurementSample> frameBuffer;
+    bool                               cycling             = false;
+    int                                cycleCount          = 0;
+
+    // Helper: open port, configure, and start a measurement session.
+    // Returns true if session started successfully.
+    auto startMeasurementOnTracker = [&]() -> bool
+    {
+        if (detectedTrackers.empty())
+            return false;
+
+        const auto &tracker  = detectedTrackers[0];
+        std::string portPath = "\\\\.\\" + tracker.portName;
+        hPort                = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hPort == INVALID_HANDLE_VALUE)
+        {
+            std::cout << "Failed to open " << tracker.portName << std::endl;
+            return false;
+        }
+
+        DCB dcb       = {};
+        dcb.DCBlength = sizeof(dcb);
+        GetCommState(hPort, &dcb);
+        dcb.BaudRate          = tracker.baudRate;
+        dcb.ByteSize          = 8;
+        dcb.StopBits          = ONESTOPBIT;
+        dcb.Parity            = NOPARITY;
+        dcb.fDtrControl       = DTR_CONTROL_ENABLE;
+        dcb.fOutxCtsFlow      = TRUE;
+        dcb.fOutxDsrFlow      = TRUE;
+        dcb.fDsrSensitivity   = TRUE;
+        dcb.fTXContinueOnXoff = TRUE;
+        dcb.XonLim            = (tracker.baudRate == 2000000) ? 22 : 82;
+        dcb.XoffLim           = 0;
+        SetCommState(hPort, &dcb);
+
+        EscapeCommFunction(hPort, SETRTS);
+        EscapeCommFunction(hPort, SETDTR);
+
+        std::vector<HHD_MarkerEntry> markers;
+        for (uint8_t tcm = 1; tcm <= 2; ++tcm)
+            for (uint8_t led = 1; led <= 3; ++led)
+                markers.push_back({tcm, led, 1});
+
+        std::cout << "Starting measurement on " << tracker.portName << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
+
+        session = StartMeasurement(hPort, 10, markers);
+        if (session)
+        {
+            measureStartTick        = GetTickCount64();
+            std::string logFilename = GenerateLogFilename();
+            logFile.open(logFilename, std::ios::out | std::ios::trunc);
+            if (logFile.is_open())
+                std::cout << "Logging to " << logFilename << std::endl;
+            frameBuffer.clear();
+            return true;
+        }
+        else
+        {
+            std::cout << "Failed to start measurement." << std::endl;
+            CloseHandle(hPort);
+            hPort = INVALID_HANDLE_VALUE;
+            return false;
+        }
+    };
+
+    // Helper: stop the current measurement session and close port.
+    auto stopCurrentMeasurement = [&]()
+    {
+        WriteFrameNdjson(logFile, frameBuffer);
+        frameBuffer.clear();
+        if (logFile.is_open())
+            logFile.close();
+        StopMeasurement(session);
+        session = nullptr;
+        if (hPort != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(hPort);
+            hPort = INVALID_HANDLE_VALUE;
+        }
+    };
 
     while (true)
     {
@@ -541,7 +623,7 @@ int main(int argc, char *argv[])
                 std::cout << "--- Scan complete: " << detectedTrackers.size() << " tracker(s) found ---\n" << std::endl;
             }
 
-            // 's' — start measurement
+            // 's' — start measurement (single run)
             else if (ch == 's' || ch == 'S')
             {
                 if (session)
@@ -555,105 +637,57 @@ int main(int argc, char *argv[])
                     continue;
                 }
 
-                // Use the first detected tracker
-                const auto &tracker  = detectedTrackers[0];
-                std::string portPath = "\\\\.\\" + tracker.portName;
-                hPort                = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (hPort == INVALID_HANDLE_VALUE)
+                cycling = false;
+                if (startMeasurementOnTracker())
+                    std::cout << "Measurement started (will auto-stop in " << (MEASURE_DURATION_MS / 1000) << "s)." << std::endl;
+            }
+
+            // 'c' — cycle: start/stop repeatedly
+            else if (ch == 'c' || ch == 'C')
+            {
+                if (session)
                 {
-                    std::cout << "Failed to open " << tracker.portName << std::endl;
+                    std::cout << "Measurement already running. Press 't' to stop first." << std::endl;
+                    continue;
+                }
+                if (detectedTrackers.empty())
+                {
+                    std::cout << "No device detected yet. Press 'h' to scan first." << std::endl;
                     continue;
                 }
 
-                // Configure port to match detection settings (baud, 8N1, handshake)
-                DCB dcb       = {};
-                dcb.DCBlength = sizeof(dcb);
-                GetCommState(hPort, &dcb);
-                dcb.BaudRate          = tracker.baudRate;
-                dcb.ByteSize          = 8;
-                dcb.StopBits          = ONESTOPBIT;
-                dcb.Parity            = NOPARITY;
-                dcb.fDtrControl       = DTR_CONTROL_ENABLE;
-                dcb.fOutxCtsFlow      = TRUE;
-                dcb.fOutxDsrFlow      = TRUE;
-                dcb.fDsrSensitivity   = TRUE;
-                dcb.fTXContinueOnXoff = TRUE;
-                dcb.XonLim            = (tracker.baudRate == 2000000) ? 22 : 82;
-                dcb.XoffLim           = 0;
-                SetCommState(hPort, &dcb);
-
-                // Assert control lines (matches detection sequence)
-                EscapeCommFunction(hPort, SETRTS);
-                EscapeCommFunction(hPort, SETDTR);
-
-                // All markers (LED 1-64) on TCM 1 and TCM 2, 1 flash each
-                std::vector<HHD_MarkerEntry> markers;
-                for (uint8_t tcm = 1; tcm <= 2; ++tcm)
-                    for (uint8_t led = 1; led <= 3; ++led)
-                        markers.push_back({tcm, led, 1});
-
-                std::cout << "Starting measurement on " << tracker.portName << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
-
-                session = StartMeasurement(hPort, 10, markers);
-                if (session)
-                {
-                    measureStartTick        = GetTickCount64();
-                    std::string logFilename = GenerateLogFilename();
-                    logFile.open(logFilename, std::ios::out | std::ios::trunc);
-                    if (logFile.is_open())
-                        std::cout << "Logging to " << logFilename << std::endl;
-                    frameBuffer.clear();
-                    std::cout << "Measurement started (will auto-stop in " << (MEASURE_DURATION_MS / 1000) << "s)." << std::endl;
-                }
-                else
-                {
-                    std::cout << "Failed to start measurement." << std::endl;
-                    CloseHandle(hPort);
-                    hPort = INVALID_HANDLE_VALUE;
-                }
+                cycling    = true;
+                cycleCount = 1;
+                std::cout << "\n=== CYCLE MODE: measuring " << (MEASURE_DURATION_MS / 1000) << "s per cycle (press 't' to stop) ===" << std::endl;
+                std::cout << "--- Cycle " << cycleCount << " ---" << std::endl;
+                if (!startMeasurementOnTracker())
+                    cycling = false;
             }
 
-            // 't' — stop measurement
+            // 't' — stop measurement (also stops cycling)
             else if (ch == 't' || ch == 'T')
             {
-                if (!session)
+                if (!session && !cycling)
                 {
                     std::cout << "No measurement running." << std::endl;
                     continue;
                 }
-                std::cout << "Stopping measurement..." << std::endl;
-                WriteFrameNdjson(logFile, frameBuffer);
-                frameBuffer.clear();
-                if (logFile.is_open())
-                    logFile.close();
-                StopMeasurement(session);
-                session = nullptr;
-                if (hPort != INVALID_HANDLE_VALUE)
-                {
-                    CloseHandle(hPort);
-                    hPort = INVALID_HANDLE_VALUE;
-                }
+                if (cycling)
+                    std::cout << "Stopping cycle mode..." << std::endl;
+                else
+                    std::cout << "Stopping measurement..." << std::endl;
+                cycling = false;
+                if (session)
+                    stopCurrentMeasurement();
                 std::cout << "Measurement stopped." << std::endl;
             }
 
             // 'q' — quit
             else if (ch == 'q' || ch == 'Q')
             {
+                cycling = false;
                 if (session)
-                {
-                    WriteFrameNdjson(logFile, frameBuffer);
-                    frameBuffer.clear();
-                    if (logFile.is_open())
-                        logFile.close();
-                    StopMeasurement(session);
-                    session = nullptr;
-                }
-                if (hPort != INVALID_HANDLE_VALUE)
-                {
-                    CloseHandle(hPort);
-                    hPort = INVALID_HANDLE_VALUE;
-                }
-
+                    stopCurrentMeasurement();
                 break;
             }
         }
@@ -661,19 +695,24 @@ int main(int argc, char *argv[])
         // --- Auto-stop after MEASURE_DURATION_MS ---
         if (session && (GetTickCount64() - measureStartTick) >= MEASURE_DURATION_MS)
         {
-            std::cout << "\n" << (MEASURE_DURATION_MS / 1000) << " seconds elapsed — stopping measurement automatically." << std::endl;
-            WriteFrameNdjson(logFile, frameBuffer);
-            frameBuffer.clear();
-            if (logFile.is_open())
-                logFile.close();
-            StopMeasurement(session);
-            session = nullptr;
-            if (hPort != INVALID_HANDLE_VALUE)
+            std::cout << "\n" << (MEASURE_DURATION_MS / 1000) << " seconds elapsed — stopping measurement." << std::endl;
+            stopCurrentMeasurement();
+
+            if (cycling)
             {
-                CloseHandle(hPort);
-                hPort = INVALID_HANDLE_VALUE;
+                // Restart for the next cycle
+                cycleCount++;
+                std::cout << "--- Cycle " << cycleCount << " ---" << std::endl;
+                if (!startMeasurementOnTracker())
+                {
+                    std::cout << "Cycle aborted — failed to restart measurement." << std::endl;
+                    cycling = false;
+                }
             }
-            std::cout << "Measurement stopped." << std::endl;
+            else
+            {
+                std::cout << "Measurement stopped." << std::endl;
+            }
         }
 
         // --- Fetch and display measurement data ---
