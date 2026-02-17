@@ -29,6 +29,3 @@ The function `ValidateMeasurementSetup(frequencyHz, markers, sot, doubleSampling
 | Double sampling penalty | When double sampling (background subtraction) is enabled, the effective SOT is doubled. This halves the maximum per-target sampling rate and may cause the SOT-bounded effective rate to be exceeded at the requested frequency. |
 | Tetherless mode interference risk | In tetherless mode, radio interference may scramble LED_ID and TCM_ID data. While coordinates may remain accurate, frame identification is unreliable. |
 | Exposure gain too high (> 10) | An auto-exposure feedback gain above 10 may cause the system to overshoot when a marker moves abruptly, degrading signal quality and position accuracy. |
-
----
-
