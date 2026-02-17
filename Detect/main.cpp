@@ -81,8 +81,7 @@ void SaveMarkerConfig(const HHD_ConfigDetectResult &config)
         for (size_t m = 0; m < tcm.markers.size(); m++)
         {
             const auto &mk = tcm.markers[m];
-            ofs << "        { \"ledId\": " << (int)mk.ledId
-                << ", \"detectionRate\": " << std::fixed << std::setprecision(2) << mk.detectionRate << " }";
+            ofs << "        { \"ledId\": " << (int)mk.ledId << ", \"detectionRate\": " << std::fixed << std::setprecision(2) << mk.detectionRate << " }";
             if (m + 1 < tcm.markers.size())
                 ofs << ",";
             ofs << "\n";
@@ -96,8 +95,7 @@ void SaveMarkerConfig(const HHD_ConfigDetectResult &config)
     for (size_t i = 0; i < config.markerList.size(); i++)
     {
         const auto &m = config.markerList[i];
-        ofs << "    { \"tcmId\": " << (int)m.tcmId << ", \"ledId\": " << (int)m.ledId
-            << ", \"flashCount\": " << (int)m.flashCount << " }";
+        ofs << "    { \"tcmId\": " << (int)m.tcmId << ", \"ledId\": " << (int)m.ledId << ", \"flashCount\": " << (int)m.flashCount << " }";
         if (i + 1 < config.markerList.size())
             ofs << ",";
         ofs << "\n";
@@ -136,10 +134,10 @@ bool LoadMarkerConfig(std::vector<HHD_MarkerEntry> &markers)
         std::string block = content.substr(pos, blockEnd - pos + 1);
 
         // Extract tcmId
-        auto extractInt = [&](const std::string &key) -> int
+        auto extractInt   = [&](const std::string &key) -> int
         {
-            std::string k   = "\"" + key + "\": ";
-            size_t      kp  = block.find(k);
+            std::string k  = "\"" + key + "\": ";
+            size_t      kp = block.find(k);
             if (kp == std::string::npos)
                 return -1;
             return std::stoi(block.substr(kp + k.size()));
@@ -610,15 +608,15 @@ int main(int argc, char *argv[])
         std::cout << "  [Markers: " << activeMarkers.size() << " configured]" << std::endl;
     }
     std::cout << std::endl;
-    ULONGLONG                          measureStartTick    = 0;
+    ULONGLONG                          measureStartTick = 0;
     std::ofstream                      logFile;
     std::vector<HHD_MeasurementSample> frameBuffer;
-    bool                               cycling             = false;
-    int                                cycleCount          = 0;
+    bool                               cycling    = false;
+    int                                cycleCount = 0;
 
     // Helper: open port, configure, and start a measurement session.
     // Returns true if session started successfully.
-    auto startMeasurementOnTracker = [&]() -> bool
+    auto startMeasurementOnTracker                = [&]() -> bool
     {
         if (detectedTrackers.empty())
             return false;
@@ -785,10 +783,10 @@ int main(int argc, char *argv[])
                 std::cout << "\n--- Auto-detecting marker configuration ---" << std::endl;
 
                 HHD_ConfigDetectOptions opts;
-                opts.maxTcmId  = 8;
-                opts.maxLedId  = 16;
+                opts.maxTcmId = 8;
+                opts.maxLedId = 16;
 
-                auto config = ConfigDetect(hProbe, opts);
+                auto config   = ConfigDetect(hProbe, opts);
                 CloseHandle(hProbe);
 
                 if (config.success && !config.markerList.empty())

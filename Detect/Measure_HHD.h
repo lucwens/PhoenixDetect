@@ -67,13 +67,8 @@ struct HHD_ValidationIssue
 //   sot         — Sample Operation Time (2–15), default 3 (matches StartMeasurement)
 //
 // Returns a (possibly empty) list of issues found.
-std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
-    int frequencyHz,
-    const std::vector<HHD_MarkerEntry> &markers,
-    int sot = 3,
-    bool doubleSampling = false,
-    bool tetherless = false,
-    int exposureGain = 0);
+std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int sot = 3,
+                                                          bool doubleSampling = false, bool tetherless = false, int exposureGain = 0);
 
 // Opaque handle for an active measurement session.
 // Allocated by StartMeasurement, freed by StopMeasurement.

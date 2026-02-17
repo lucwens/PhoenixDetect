@@ -184,28 +184,28 @@ namespace
 
         // Decode status word fields (bytes 14-17, 0-indexed: rec[13]-rec[16])
         // Byte 14: E|HHH|mmmm
-        uint8_t b14        = rec[13];
-        s.endOfFrame       = (b14 >> 7) & 1;
-        s.coordStatus      = (b14 >> 4) & 0x07;
-        s.ambientLight     = b14 & 0x0F;
+        uint8_t b14             = rec[13];
+        s.endOfFrame            = (b14 >> 7) & 1;
+        s.coordStatus           = (b14 >> 4) & 0x07;
+        s.ambientLight          = b14 & 0x0F;
 
         // Byte 15: ???|La|AAAA (right eye)
-        uint8_t b15        = rec[14];
-        s.rightEyeSignal   = (b15 >> 4) & 0x01;
-        s.rightEyeStatus   = b15 & 0x0F;
+        uint8_t b15             = rec[14];
+        s.rightEyeSignal        = (b15 >> 4) & 0x01;
+        s.rightEyeStatus        = b15 & 0x0F;
 
         // Byte 16: TTT|Lb|BBBB (center eye + trigger high bits)
-        uint8_t b16        = rec[15];
-        s.centerEyeSignal  = (b16 >> 4) & 0x01;
-        s.centerEyeStatus  = b16 & 0x0F;
+        uint8_t b16             = rec[15];
+        s.centerEyeSignal       = (b16 >> 4) & 0x01;
+        s.centerEyeStatus       = b16 & 0x0F;
 
         // Byte 17: TTT|Lc|CCCC (left eye + trigger low bits)
-        uint8_t b17        = rec[16];
-        s.leftEyeSignal    = (b17 >> 4) & 0x01;
-        s.leftEyeStatus    = b17 & 0x0F;
+        uint8_t b17             = rec[16];
+        s.leftEyeSignal         = (b17 >> 4) & 0x01;
+        s.leftEyeStatus         = b17 & 0x0F;
 
         // Trigger index: upper 3 bits of byte 16 + upper 3 bits of byte 17
-        s.triggerIndex     = ((b16 >> 5) & 0x07) << 3 | ((b17 >> 5) & 0x07);
+        s.triggerIndex          = ((b16 >> 5) & 0x07) << 3 | ((b17 >> 5) & 0x07);
 
         return s;
     }
@@ -273,20 +273,13 @@ struct HHD_MeasurementSession
 // Measurement Setup Validation
 // --------------------------------------------------------------------------
 
-std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
-    int frequencyHz,
-    const std::vector<HHD_MarkerEntry> &markers,
-    int sot,
-    bool doubleSampling,
-    bool tetherless,
-    int exposureGain)
+std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int sot, bool doubleSampling,
+                                                          bool tetherless, int exposureGain)
 {
     std::vector<HHD_ValidationIssue> issues;
 
-    auto addError = [&](const std::string &msg)
-    { issues.push_back({HHD_IssueSeverity::Error, msg}); };
-    auto addWarning = [&](const std::string &msg)
-    { issues.push_back({HHD_IssueSeverity::Warning, msg}); };
+    auto addError   = [&](const std::string &msg) { issues.push_back({HHD_IssueSeverity::Error, msg}); };
+    auto addWarning = [&](const std::string &msg) { issues.push_back({HHD_IssueSeverity::Warning, msg}); };
 
     // --- Basic parameter validation ---
 
@@ -303,8 +296,8 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
 
     // --- Per-marker validation ---
 
-    uint32_t totalFlashes       = 0;
-    int      markerCount        = static_cast<int>(markers.size());
+    uint32_t                            totalFlashes = 0;
+    int                                 markerCount  = static_cast<int>(markers.size());
     // Per-TCM bookkeeping: count of (LEDID,#flash) pairs and set of LED IDs
     std::map<uint8_t, int>              pairsPerTcm;
     std::map<uint8_t, std::vector<int>> ledsPerTcm;
@@ -312,8 +305,7 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
     for (int i = 0; i < markerCount; ++i)
     {
         const auto &m   = markers[i];
-        std::string loc = "Marker[" + std::to_string(i) + "] (TCM " +
-                          std::to_string(m.tcmId) + ", LED " + std::to_string(m.ledId) + "): ";
+        std::string loc = "Marker[" + std::to_string(i) + "] (TCM " + std::to_string(m.tcmId) + ", LED " + std::to_string(m.ledId) + "): ";
 
         if (m.tcmId < 1 || m.tcmId > 8)
             addError(loc + "TCM ID out of range (1-8).");
@@ -332,8 +324,7 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
     // --- Total marker capacity ---
 
     if (markerCount > 512)
-        addError("Total marker count " + std::to_string(markerCount) +
-                 " exceeds system maximum (512).");
+        addError("Total marker count " + std::to_string(markerCount) + " exceeds system maximum (512).");
 
     // --- TFS memory constraints ---
 
@@ -341,8 +332,7 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
     for (const auto &[tcm, count] : pairsPerTcm)
     {
         if (count > 64)
-            addError("TCM " + std::to_string(tcm) + " has " + std::to_string(count) +
-                     " marker entries in the TFS (maximum 64 per TCM).");
+            addError("TCM " + std::to_string(tcm) + " has " + std::to_string(count) + " marker entries in the TFS (maximum 64 per TCM).");
     }
 
     // Max 64 TCMID changes while traversing the TFS (restart counts as a change).
@@ -361,8 +351,7 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
             tcmChanges++;
 
         if (tcmChanges > 64)
-            addError("TFS contains " + std::to_string(tcmChanges) +
-                     " TCM ID transitions (maximum 64, including restart).");
+            addError("TFS contains " + std::to_string(tcmChanges) + " TCM ID transitions (maximum 64, including restart).");
     }
 
     // --- LED ID gap detection (SIK/Octopus requirement) ---
@@ -392,14 +381,14 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
             std::string ids;
             for (size_t j = 0; j < missing.size(); ++j)
             {
-                if (j > 0) ids += ", ";
+                if (j > 0)
+                    ids += ", ";
                 ids += std::to_string(missing[j]);
             }
             if (missing.size() < static_cast<size_t>(maxLed - static_cast<int>(sorted.size())))
                 ids += ", ...";
 
-            addWarning("TCM " + std::to_string(tcm) + " has gaps in LED IDs (missing: " +
-                       ids + "). SIK/Octopus markers require contiguous IDs from 1.");
+            addWarning("TCM " + std::to_string(tcm) + " has gaps in LED IDs (missing: " + ids + "). SIK/Octopus markers require contiguous IDs from 1.");
         }
     }
 
@@ -407,18 +396,17 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
 
     if (frequencyHz >= 1 && totalFlashes > 0)
     {
-        uint32_t framePeriod_us  = 1000000 / static_cast<uint32_t>(frequencyHz);
-        uint32_t activeTime_us   = totalFlashes * DEFAULT_SAMPLING_PERIOD_US;
+        uint32_t framePeriod_us = 1000000 / static_cast<uint32_t>(frequencyHz);
+        uint32_t activeTime_us  = totalFlashes * DEFAULT_SAMPLING_PERIOD_US;
 
         if (activeTime_us > framePeriod_us)
         {
             double maxFps = 1000000.0 / activeTime_us;
-            addError("Requested " + std::to_string(frequencyHz) + " Hz but " +
-                     std::to_string(totalFlashes) + " flashes/frame at " +
-                     std::to_string(DEFAULT_SAMPLING_PERIOD_US) + " us sampling period "
-                     "require at least " + std::to_string(activeTime_us) +
-                     " us per frame. Maximum achievable rate is ~" +
-                     std::to_string(static_cast<int>(maxFps)) + " Hz.");
+            addError("Requested " + std::to_string(frequencyHz) + " Hz but " + std::to_string(totalFlashes) + " flashes/frame at " +
+                     std::to_string(DEFAULT_SAMPLING_PERIOD_US) +
+                     " us sampling period "
+                     "require at least " +
+                     std::to_string(activeTime_us) + " us per frame. Maximum achievable rate is ~" + std::to_string(static_cast<int>(maxFps)) + " Hz.");
         }
         else if (activeTime_us == framePeriod_us)
         {
@@ -436,17 +424,18 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
 
     if (sot >= 2 && sot <= 15 && totalFlashes > 0 && frequencyHz >= 1)
     {
-        int effectiveSot = doubleSampling ? sot * 2 : sot;
-        double maxTargetHz = 26040.0 / effectiveSot;
-        double maxFps      = maxTargetHz / totalFlashes;
+        int    effectiveSot = doubleSampling ? sot * 2 : sot;
+        double maxTargetHz  = 26040.0 / effectiveSot;
+        double maxFps       = maxTargetHz / totalFlashes;
 
         if (frequencyHz > static_cast<int>(maxFps))
         {
-            addWarning("At SOT=" + std::to_string(sot) + " the per-target limit is ~" +
-                       std::to_string(static_cast<int>(maxTargetHz)) + " Hz. With " +
-                       std::to_string(totalFlashes) + " flashes/frame the effective "
-                       "maximum is ~" + std::to_string(static_cast<int>(maxFps)) +
-                       " Hz, but " + std::to_string(frequencyHz) + " Hz was requested. "
+            addWarning("At SOT=" + std::to_string(sot) + " the per-target limit is ~" + std::to_string(static_cast<int>(maxTargetHz)) + " Hz. With " +
+                       std::to_string(totalFlashes) +
+                       " flashes/frame the effective "
+                       "maximum is ~" +
+                       std::to_string(static_cast<int>(maxFps)) + " Hz, but " + std::to_string(frequencyHz) +
+                       " Hz was requested. "
                        "Samples may be skipped.");
         }
     }
@@ -464,11 +453,8 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
     {
         if (markers[i].flashCount > 10)
         {
-            addWarning("Marker[" + std::to_string(i) + "] (TCM " +
-                       std::to_string(markers[i].tcmId) + ", LED " +
-                       std::to_string(markers[i].ledId) + "): flash count " +
-                       std::to_string(markers[i].flashCount) +
-                       " is high. Increased LED duty cycle raises heat load.");
+            addWarning("Marker[" + std::to_string(i) + "] (TCM " + std::to_string(markers[i].tcmId) + ", LED " + std::to_string(markers[i].ledId) +
+                       "): flash count " + std::to_string(markers[i].flashCount) + " is high. Increased LED duty cycle raises heat load.");
         }
     }
 
@@ -536,14 +522,14 @@ HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const st
     // then drain it so it doesn't collide with the first command ACK.
     Sleep(300);
     {
-        DWORD   drainErrors  = 0;
-        COMSTAT drainStat    = {};
+        DWORD   drainErrors = 0;
+        COMSTAT drainStat   = {};
         ClearCommError(hPort, &drainErrors, &drainStat);
         if (drainStat.cbInQue > 0)
         {
             std::cout << "  [Measure] Draining " << drainStat.cbInQue << " bytes (Initial Message)" << std::endl;
             std::vector<uint8_t> drain(drainStat.cbInQue);
-            DWORD bytesRead = 0;
+            DWORD                bytesRead = 0;
             ReadFile(hPort, drain.data(), drainStat.cbInQue, &bytesRead, NULL);
         }
         PurgeComm(hPort, PURGE_RXCLEAR);
@@ -865,8 +851,8 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     HHD_ConfigDetectResult result = {};
     result.success                = false;
 
-    int maxTcm = (options.maxTcmId >= 1 && options.maxTcmId <= 8) ? options.maxTcmId : 8;
-    int maxLed = (options.maxLedId >= 1 && options.maxLedId <= 64) ? options.maxLedId : 16;
+    int maxTcm                    = (options.maxTcmId >= 1 && options.maxTcmId <= 8) ? options.maxTcmId : 8;
+    int maxLed                    = (options.maxLedId >= 1 && options.maxLedId <= 64) ? options.maxLedId : 16;
 
     // Build candidate marker list: all combinations of TCM 1..maxTcm × LED 1..maxLed
     std::vector<HHD_MarkerEntry> candidates;
@@ -889,7 +875,7 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     // --- Warm-up phase: discard data while the tracker adjusts auto-exposure ---
     std::cout << "[ConfigDetect] Warm-up: discarding data for " << options.warmupMs << "ms" << std::endl;
     {
-        ULONGLONG warmupStart = GetTickCount64();
+        ULONGLONG                          warmupStart = GetTickCount64();
         std::vector<HHD_MeasurementSample> discarded;
         while ((GetTickCount64() - warmupStart) < static_cast<ULONGLONG>(options.warmupMs))
         {
@@ -913,7 +899,7 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     std::map<uint16_t, ProbeStats> stats;
 
     {
-        ULONGLONG evalStart = GetTickCount64();
+        ULONGLONG                          evalStart = GetTickCount64();
         std::vector<HHD_MeasurementSample> samples;
         while ((GetTickCount64() - evalStart) < static_cast<ULONGLONG>(options.evalMs))
         {
@@ -928,9 +914,7 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
                 if (s.coordStatus == 0)
                     st.framesCoordOk++;
 
-                bool allEyesOk = (s.rightEyeStatus == 0) &&
-                                 (s.centerEyeStatus == 0) &&
-                                 (s.leftEyeStatus == 0);
+                bool allEyesOk = (s.rightEyeStatus == 0) && (s.centerEyeStatus == 0) && (s.leftEyeStatus == 0);
                 if (!allEyesOk)
                     st.framesAllLow++;
 
@@ -952,28 +936,24 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     // A marker is considered "present" if a sufficient fraction of eval
     // frames had coordStatus==0 AND at least one camera eye saw the signal.
     std::map<uint8_t, std::vector<HHD_DetectedMarker>> tcmMarkers;
-    int totalDetected = 0;
+    int                                                totalDetected = 0;
 
     // Diagnostic: print per-marker stats
     std::cout << "[ConfigDetect] Per-marker evaluation results:" << std::endl;
     for (const auto &[key, st] : stats)
     {
-        uint8_t tcm = static_cast<uint8_t>(key >> 8);
-        uint8_t led = static_cast<uint8_t>(key & 0xFF);
+        uint8_t tcm       = static_cast<uint8_t>(key >> 8);
+        uint8_t led       = static_cast<uint8_t>(key & 0xFF);
 
-        double validRate   = (st.framesTotal > 0) ? static_cast<double>(st.framesValid) / st.framesTotal : 0.0;
-        double allLowRate  = (st.framesTotal > 0) ? static_cast<double>(st.framesAllLow) / st.framesTotal : 0.0;
+        double validRate  = (st.framesTotal > 0) ? static_cast<double>(st.framesValid) / st.framesTotal : 0.0;
+        double allLowRate = (st.framesTotal > 0) ? static_cast<double>(st.framesAllLow) / st.framesTotal : 0.0;
 
         // Only print markers that have some valid frames (reduce noise)
         if (st.framesValid > 0 || st.framesAllLow < st.framesTotal)
         {
-            std::cout << "  TCM" << (int)tcm << " LED" << std::setw(2) << (int)led
-                      << "  total=" << st.framesTotal
-                      << "  valid=" << st.framesValid
-                      << "  coordOk=" << st.framesCoordOk
-                      << "  allEyesLow=" << st.framesAllLow
-                      << "  rate=" << std::fixed << std::setprecision(0) << (validRate * 100) << "%"
-                      << std::endl;
+            std::cout << "  TCM" << (int)tcm << " LED" << std::setw(2) << (int)led << "  total=" << st.framesTotal << "  valid=" << st.framesValid
+                      << "  coordOk=" << st.framesCoordOk << "  allEyesLow=" << st.framesAllLow << "  rate=" << std::fixed << std::setprecision(0)
+                      << (validRate * 100) << "%" << std::endl;
         }
 
         if (st.framesTotal < options.minFrames)
@@ -1001,8 +981,7 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
     for (auto &[tcmId, markers] : tcmMarkers)
     {
         // Sort markers by LED ID
-        std::sort(markers.begin(), markers.end(),
-                  [](const HHD_DetectedMarker &a, const HHD_DetectedMarker &b) { return a.ledId < b.ledId; });
+        std::sort(markers.begin(), markers.end(), [](const HHD_DetectedMarker &a, const HHD_DetectedMarker &b) { return a.ledId < b.ledId; });
 
         HHD_DetectedTCM dtcm;
         dtcm.tcmId   = tcmId;
