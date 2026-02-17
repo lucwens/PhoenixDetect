@@ -5,14 +5,14 @@
   </Configurations>
   <Folder Name="/Doc/">
     <File Path="Doc/Cheat sheet.md" />
-    <File Path="Doc/Detect analysis Gemini.md" />
     <File Path="Doc/MeasureFailure.md" />
     <File Path="Doc/OnlineUserManual.pdf" />
     <File Path="Doc/PTI LOW LEVEL CONTROL KIT FEB 2022 - CONFIDENTIAL.PDF" />
     <File Path="Doc/QuickStartGuide.pdf" />
     <File Path="Doc/runloop.md" />
     <File Path="Doc/VZDaq_Manual_V200.pdf" />
+    <File Path="README.md" />
   </Folder>
-  <Project Path="ConvertToJson/ConvertToJson.vcxproj" Id="b2e391d7-f46f-4024-9186-3f401a7936ea" />
-  <Project Path="Detect/Detect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
+  <Project Path="D:/Phoenix/ConvertToJson/ConvertToJson.vcxproj" Id="b2e391d7-f46f-4024-9186-3f401a7936ea" />
+  <Project Path="D:/Phoenix/Detect/Detect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
 </Solution>

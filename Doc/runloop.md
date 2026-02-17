@@ -33,82 +33,89 @@ and **StopMeasurement**.
 
 Every command follows the PTI format (Section 4.2, page 14):
 
-```
-Byte 1: '&' (0x26)     — command header
-Byte 2: Command Code    — ASCII character identifying the command
-Byte 3: Command Index   — typically '0' or TCMID ('1'-'8')
-Byte 4: #Bytes/Param    — bytes per parameter ('0'-'9')
-Byte 5: #Params         — number of parameters ('0'-'9')
-Byte 6: CR (0x0D)       — end of command word
-Byte 7+: Parameter data  — binary, MSB first
-```
+| Byte | Field | Value |
+|:---|:---|:---|
+| 1 | Command header | `&` (0x26), always fixed |
+| 2 | Command Code | ASCII character (e.g. `L`, `3`, `p`) |
+| 3 | Command Index | `0` if unused, or TCMID `1`–`8` |
+| 4 | Bytes/Param | Bytes per parameter (`0`–`9`) |
+| 5 | Num Params | Number of parameters (`0`–`9`) |
+| 6 | Terminator | CR (0x0D) |
+| 7+ | Param data | Binary, MSB first (optional) |
 
 #### Configuration Phase (20:55:10.803 – 20:55:14.577)
 
-| # | Time Offset | Command | Hex | Params | PTI Reference |
-|---|-------------|---------|-----|--------|---------------|
-| 1 | +0.000 | `&`` 000 | `26 60 30 30 30 0d` | — | Status/version query (undocumented) |
-| 2 | +1.703 | `&v` 042 | `26 76 30 34 32 0d` + 8 bytes | `00 00 00 73 00 0f 3a 9d` | **Set Timing** — Sampling Period = 115 μs, Intermission = 998,045 μs |
-| 3 | +1.859 | `&L` 011 | `26 4c 30 31 31 0d` + 1 byte | `02` | **Signal Quality (SQR)** = 2 |
-| 4 | +1.923 | `&O` 021 | `26 4f 30 32 31 0d` + 2 bytes | `00 02` | **Min Signal (MSR)** = 0x0002 |
-| 5 | +1.986 | `&Y` A11 | `26 59 41 31 31 0d` + 1 byte | `08` | **Exposure Gain** = 8 |
-| 6 | +2.111 | `&U` 011 | `26 55 30 31 31 0d` + 1 byte | `03` | **SOT Limit** = 3 |
-| 7 | +2.176 | `&^` 011 | `26 5e 30 31 31 0d` + 1 byte | `0d` | **Tether Mode** = 0x0D |
-| 8 | +2.239 | `&Q` A00 | `26 51 41 30 30 0d` | — | **Single Sampling** mode |
-| 9 | +2.270 | `&p` 000 | `26 70 30 30 30 0d` | — | **Clear TFS** |
-| 10–25 | +2.332 – +3.282 | `&p` 112 | `26 70 31 31 32 0d` + 2 bytes | `{01..10} 01` | **Append TFS** — 16 LEDs on TCM 1, 1 flash each |
-| 26 | +3.347 | `&o` 000 | `26 6f 30 30 30 0d` | — | **Sync EOF** mode |
-| 27 | +3.409 | `&X` 018 | `26 58 30 31 38 0d` + 8 bytes | `00 00 00 00 00 00 00 00` | **Multi-Rate Sampling** — all zeros (SM0) |
-| 28 | +3.520 | `&r` 000 | `26 72 30 30 30 0d` | — | **Upload TFS** to TCMs |
-| 29 | +3.710 | `&:` 000 | `26 3a 30 30 30 0d` | — | **Refraction OFF** |
-| 30 | +3.774 | `&S` 000 | `26 53 30 30 30 0d` | — | **Internal Trigger** |
+| # | Offset | Command | Description |
+|:---|:---|:---|:---|
+| 1 | +0.000 | `` &` 000 `` | Status/version query (undocumented) |
+| 2 | +1.703 | `&v 042` | **Set Timing** — Period = 115 μs, Intermission = 998,045 μs |
+| 3 | +1.859 | `&L 011` | **Signal Quality (SQR)** = 2 |
+| 4 | +1.923 | `&O 021` | **Min Signal (MSR)** = 0x0002 |
+| 5 | +1.986 | `&Y A11` | **Exposure Gain** = 8 |
+| 6 | +2.111 | `&U 011` | **SOT Limit** = 3 |
+| 7 | +2.176 | `&^ 011` | **Tether Mode** = 0x0D |
+| 8 | +2.239 | `&Q A00` | **Single Sampling** mode |
+| 9 | +2.270 | `&p 000` | **Clear TFS** |
+| 10–25 | +2.332 | `&p 112` ×16 | **Append TFS** — 16 LEDs on TCM 1, 1 flash each |
+| 26 | +3.347 | `&o 000` | **Sync EOF** mode |
+| 27 | +3.409 | `&X 018` | **Multi-Rate Sampling** — all zeros (SM0) |
+| 28 | +3.520 | `&r 000` | **Upload TFS** to TCMs |
+| 29 | +3.710 | `&: 000` | **Refraction OFF** |
+| 30 | +3.774 | `&S 000` | **Internal Trigger** |
 
 #### Start Measurement
 
-| # | Time Offset | Command | Hex | Notes |
-|---|-------------|---------|-----|-------|
-| 31 | +3.857 | `&3` 000 | `26 33 30 30 30 0d` | **START Periodic Sampling** — no ACK generated (PTI manual p.44) |
+| # | Offset | Command | Description |
+|:---|:---|:---|:---|
+| 31 | +3.857 | `&3 000` | **START Periodic Sampling** — no ACK generated |
 
 #### Stop Measurement
 
-| # | Time Offset | Command | Hex | Notes |
-|---|-------------|---------|-----|-------|
-| 32 | +15.240 | `&5` 000 | `26 35 30 30 30 0d` | **STOP Sampling** — 1st attempt |
-| 33 | +16.756 | `&5` 000 | `26 35 30 30 30 0d` | **STOP Sampling** — 2nd attempt (redundant, ensures stop) |
+| # | Offset | Command | Description |
+|:---|:---|:---|:---|
+| 32 | +15.240 | `&5 000` | **STOP Sampling** — 1st attempt |
+| 33 | +16.756 | `&5 000` | **STOP Sampling** — 2nd attempt (ensures stop) |
 
 ### 2.3 Command/Response Pattern
 
 Between each configuration command, the capture shows:
 
-1. **PurgeComm** (PURGE_RXCLEAR) — flush stale RX data
-2. **WriteFile** — send command bytes
-3. **IOCTL_SERIAL_GET_COMMSTATUS** poll loop (~1ms interval) — wait for data in RX queue
-4. **ReadFile** — read 19-byte ACK response
+| Step | Win32 Call | Purpose |
+|:---|:---|:---|
+| 1 | `PurgeComm(PURGE_RXCLEAR)` | Flush stale RX data |
+| 2 | `WriteFile` | Send command bytes |
+| 3 | `IOCTL_SERIAL_GET_COMMSTATUS` poll (~1 ms) | Wait for data in RX queue |
+| 4 | `ReadFile` (19 bytes) | Read ACK response |
 
 Each ACK response (19 bytes) follows the Message Set format (PTI Section 4.4, page 19):
 
-```
-Byte 1:     Command Code echo (e.g., 0x76 for &v)
-Byte 2:     Command Index echo (e.g., 0x30 for '0')
-Bytes 3-13: Reserved (zeros)
-Byte 14:    Message Parameter (0x06)
-Byte 15:    Message ID
-Bytes 16-19: Check Bits (e0 e0 80 e0)
-```
+| Bytes | Field | Example |
+|:---|:---|:---|
+| 1 | Command Code echo | `0x76` for `&v` |
+| 2 | Command Index echo | `0x30` for `0` |
+| 3–13 | Reserved | zeros |
+| 14 | Message Parameter | `0x06` |
+| 15 | Message ID | — |
+| 16–19 | Check Bits | `e0 e0 80 e0` |
 
 ### 2.4 Timing Calculation
 
 The `&v` command parameters decode as:
-- **Sampling Period**: `00 00 00 73` = 115 μs per marker
-- **Sequence Intermission**: `00 0f 3a 9d` = 998,045 μs
+
+| Parameter | Hex | Decoded | Unit |
+|:---|:---|:---|:---|
+| Sampling Period | `00 00 00 73` | 115 | μs per marker |
+| Sequence Intermission | `00 0f 3a 9d` | 998,045 | μs |
 
 Total frame period = (16 channels × 115 μs) + 998,045 μs = 1,840 + 998,045 = **999,885 μs ≈ 1 Hz**
 
 General formula for a desired frequency:
-```
-total_flashes   = sum of flashCount across all markers in the TFS
-intermission_us = (1,000,000 / frequency_Hz) - (total_flashes × sampling_period_us)
-```
+
+| Variable | Formula |
+|:---|:---|
+| `total_flashes` | Sum of `flashCount` across all markers in the TFS |
+| `frame_period_us` | `1,000,000 / frequency_Hz` |
+| `intermission_us` | `frame_period_us - (total_flashes × sampling_period_us)` |
 
 ---
 
@@ -116,15 +123,15 @@ intermission_us = (1,000,000 / frequency_Hz) - (total_flashes × sampling_period
 
 Every measurement record is exactly **19 bytes**:
 
-```
-Bytes 1-4:   Timestamp    — unsigned 32-bit, microseconds since tracker boot
-Bytes 5-7:   X coordinate — signed 24-bit, units of 10 μm (divide by 100 for mm)
-Bytes 8-10:  Y coordinate — signed 24-bit, units of 10 μm
-Bytes 11-13: Z coordinate — signed 24-bit, units of 10 μm
-Bytes 14-17: Status Word  — signal quality and computation flags
-Byte 18:     LEDID        — bit 7 always 1, bits 6-0 = LED ID (1-64)
-Byte 19:     TCMID        — bits 7-4 = 0xE (1110), bits 3-0 = TCM ID (1-8)
-```
+| Bytes | Field | Encoding | Range |
+|:---|:---|:---|:---|
+| 1–4 | Timestamp | Unsigned 32-bit, big-endian | μs since tracker boot |
+| 5–7 | X coordinate | Signed 24-bit, big-endian | ÷100 → mm |
+| 8–10 | Y coordinate | Signed 24-bit, big-endian | ÷100 → mm |
+| 11–13 | Z coordinate | Signed 24-bit, big-endian | ÷100 → mm |
+| 14–17 | Status Word | Unsigned 32-bit, big-endian | Signal quality flags |
+| 18 | LEDID | Bit 7 = 1, bits 6–0 = ID | 1–64 |
+| 19 | TCMID | Bits 7–4 = 0xE, bits 3–0 = ID | 1–8 |
 
 ### 3.1 Coordinate Parsing
 
@@ -137,18 +144,21 @@ double mm = coord / 100.0;
 
 ### 3.2 LEDID / TCMID Extraction
 
-```cpp
-uint8_t ledId = buffer[17] & 0x7F;  // mask off bit 7
-uint8_t tcmId = buffer[18] & 0x0F;  // mask off upper nibble
-```
+| Field | Expression | Mask | Result |
+|:---|:---|:---|:---|
+| LED ID | `buffer[17] & 0x7F` | Mask off bit 7 | 1–64 |
+| TCM ID | `buffer[18] & 0x0F` | Mask off upper nibble | 1–8 |
 
 ### 3.3 Data Arrival Pattern (from IRP capture)
 
 At 1 Hz with 16 channels:
-- **Per burst**: 16 records × 19 bytes = 304 bytes
-- **Burst interval**: ~1000 ms
-- **Read pattern**: 2–3 ReadFile calls per burst (OS buffers variable amounts)
-- The first burst after START arrives within ~1 ms of the `&3` command
+
+| Metric | Value |
+|:---|:---|
+| Per burst | 16 records × 19 bytes = 304 bytes |
+| Burst interval | ~1000 ms |
+| Read pattern | 2–3 ReadFile calls per burst (OS buffers vary) |
+| First burst latency | < 1 ms after `&3` START command |
 
 ---
 
@@ -233,11 +243,13 @@ auto* session = StartMeasurement(hPort, 10, markers); // 10 Hz
 #### Session State
 
 The `HHD_MeasurementSession` struct holds:
-- `HANDLE hPort` — the COM port handle (not owned, caller manages lifetime)
-- `int frequencyHz` — active frequency
-- `std::vector<HHD_MarkerEntry> markers` — the TFS configuration
-- `std::vector<uint8_t> residual` — leftover bytes from partial reads
-  (since ReadFile may return a non-multiple of 19 bytes)
+
+| Field | Type | Description |
+|:---|:---|:---|
+| `hPort` | `HANDLE` | COM port handle (not owned, caller manages lifetime) |
+| `frequencyHz` | `int` | Active measurement frequency |
+| `markers` | `vector<HHD_MarkerEntry>` | The TFS configuration |
+| `residual` | `vector<uint8_t>` | Leftover bytes from partial reads (< 19 bytes) |
 
 #### StartMeasurement Flow
 
@@ -283,41 +295,45 @@ Encode into `&v` command:
 
 Each configuration command follows the same pattern observed in the IRP capture:
 
-1. `PurgeComm(hPort, PURGE_RXCLEAR)` — flush stale data
-2. `WriteFile(hPort, cmdBytes, cmdLen)` — send command
-3. Poll with `ClearCommError` checking `cbInQue` until ≥ 19 bytes available (max ~500ms)
-4. `ReadFile(hPort, ackBuf, 19)` — read 19-byte ACK
-5. Validate: `ackBuf[0]` should echo the command code
+| Step | Call | Purpose |
+|:---|:---|:---|
+| 1 | `PurgeComm(PURGE_RXCLEAR)` | Flush stale data |
+| 2 | `WriteFile(cmdBytes, cmdLen)` | Send command |
+| 3 | `ClearCommError` poll (≥ 19 bytes, max 500 ms) | Wait for ACK in RX queue |
+| 4 | `ReadFile(ackBuf, 19)` | Read 19-byte ACK |
+| 5 | Validate `ackBuf[0]` == command code | Confirm correct echo |
 
 #### FetchMeasurements Flow
 
 Called in a run loop, designed for non-blocking operation:
 
-1. **Check available data**: `ClearCommError` → `comstat.cbInQue`
-2. **ReadFile** all available bytes into a working buffer
-3. **Prepend residual** bytes from previous call
-4. **Parse complete 19-byte records**:
-   - Extract timestamp (bytes 0-3, big-endian unsigned 32-bit)
-   - Extract X/Y/Z (bytes 4-12, three signed 24-bit values)
-   - Extract status (bytes 13-16, big-endian unsigned 32-bit)
-   - Extract LEDID (byte 17, mask 0x7F) and TCMID (byte 18, mask 0x0F)
-   - Convert coordinates to mm (÷ 100.0)
-   - Append to output vector
-5. **Save residual** (any trailing bytes < 19) for next call
-6. **Return** count of new samples
+| Step | Action | Details |
+|:---|:---|:---|
+| 1 | Check available data | `ClearCommError` → `comstat.cbInQue` |
+| 2 | Read bytes | `ReadFile` all available bytes into working buffer |
+| 3 | Prepend residual | Merge leftover bytes from previous call |
+| 4 | Parse 19-byte records | Timestamp, X/Y/Z (÷100 → mm), status, LED ID, TCM ID |
+| 5 | Save residual | Store any trailing bytes < 19 for next call |
+| 6 | Return | Count of new samples appended |
 
 #### StopMeasurement Flow
 
-1. **Send stop**: `&5 000` — twice, with ~1.5s gap (matches IRP capture)
-2. **Drain** any remaining data in the RX buffer
-3. **Free** the session struct
+| Step | Action | Details |
+|:---|:---|:---|
+| 1 | Send `&5 000` | STOP — 1st attempt |
+| 2 | Sleep 1.5 s | Gap between attempts (matches IRP capture) |
+| 3 | Send `&5 000` | STOP — 2nd attempt (ensures stop) |
+| 4 | Drain RX buffer | `PurgeComm(PURGE_RXCLEAR)` |
+| 5 | Free session | Delete `HHD_MeasurementSession` struct |
 
 ### 4.4 Error Handling
 
-- `SendCommand` returns false if WriteFile fails or ACK is not received within timeout
-- `StartMeasurement` returns nullptr if any config command fails
-- `FetchMeasurements` returns 0 on read errors (caller can check and stop)
-- `StopMeasurement` returns false if both stop attempts fail to get acknowledgment
+| Function | Failure return | Condition |
+|:---|:---|:---|
+| `SendCommand` | `false` | WriteFile fails or ACK not received within timeout |
+| `StartMeasurement` | `nullptr` | Any configuration command fails |
+| `FetchMeasurements` | `0` | Read error (caller can check and stop) |
+| `StopMeasurement` | `false` | Both stop attempts fail to get acknowledgment |
 
 ### 4.5 Thread Safety
 
@@ -329,21 +345,21 @@ the single-threaded run-loop pattern requested.
 
 ## 5. IRP Capture Command-to-PTI Manual Cross-Reference
 
-| IRP Command | PTI Manual Section | Page | Function |
-|-------------|-------------------|------|----------|
-| `&`` 000 | — | — | Undocumented (firmware query, sent before config) |
-| `&v` 042 | 4.7.14 | 38 | Set Timing (Sampling Period + Intermission) |
-| `&L` 011 | 4.7.4 | 28 | Signal Quality Requirement (SQR) |
-| `&O` 021 | 4.7.5 | 29 | Minimum Signal Requirement (MSR) |
-| `&Y` A11 | 4.7.3 | 27 | Auto-Exposure Feedback Gain |
-| `&U` 011 | 4.7.6 | 30 | SOT (Sample Operation Time) Limit |
-| `&^` 011 | 4.7.17 | 41 | Tether Mode |
-| `&Q` A00 | 4.7.1 | 25 | Single Sampling |
-| `&p` 000/112 | 4.7.8 | 32 | Program TFS (Clear / Append) |
-| `&o` 000 | 4.7.10 | 34 | Sync EOF |
-| `&X` 018 | 4.7.7 | 31 | Multi-Rate Sampling |
-| `&r` 000 | 4.7.9 | 33 | Upload TFS |
-| `&:` 000 | 4.7.12 | 36 | Refraction OFF |
-| `&S` 000 | 4.8.2 | 44 | Internal Trigger |
-| `&3` 000 | 4.8.1 | 43 | Start Periodic Sampling (no ACK) |
-| `&5` 000 | 4.8.3 | 45 | Stop Sampling |
+| Command | Args | Section | Page | Function |
+|:---|:---|:---|:---|:---|
+| `` &` `` | `000` | — | — | Undocumented firmware query |
+| `&v` | `042` | 4.7.14 | 38 | Set Timing |
+| `&L` | `011` | 4.7.4 | 28 | Signal Quality (SQR) |
+| `&O` | `021` | 4.7.5 | 29 | Min Signal (MSR) |
+| `&Y` | `A11` | 4.7.3 | 27 | Auto-Exposure Gain |
+| `&U` | `011` | 4.7.6 | 30 | SOT Limit |
+| `&^` | `011` | 4.7.17 | 41 | Tether Mode |
+| `&Q` | `A00` | 4.7.1 | 25 | Single Sampling |
+| `&p` | `000` / `112` | 4.7.8 | 32 | Program TFS (Clear / Append) |
+| `&o` | `000` | 4.7.10 | 34 | Sync EOF |
+| `&X` | `018` | 4.7.7 | 31 | Multi-Rate Sampling |
+| `&r` | `000` | 4.7.9 | 33 | Upload TFS |
+| `&:` | `000` | 4.7.12 | 36 | Refraction OFF |
+| `&S` | `000` | 4.8.2 | 44 | Internal Trigger |
+| `&3` | `000` | 4.8.1 | 43 | Start Periodic Sampling |
+| `&5` | `000` | 4.8.3 | 45 | Stop Sampling |
