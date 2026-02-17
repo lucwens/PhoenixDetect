@@ -51,6 +51,15 @@ LED IDs under a TCM are not contiguous from 1. SIK and Octopus markers require a
 ### High flash count (> 10)
 A marker has a `flashCount` above 10. Higher flash counts increase the LED duty cycle and heat load, and reduce the effective frame rate.
 
+### Double sampling penalty
+When double sampling (background subtraction) is enabled, the effective SOT is doubled. This halves the maximum per-target sampling rate and may cause the SOT-bounded effective rate to be exceeded at the requested frequency.
+
+### Tetherless mode interference risk
+In tetherless mode, radio interference may scramble LED_ID and TCM_ID data. While coordinates may remain accurate, frame identification is unreliable.
+
+### Exposure gain too high (> 10)
+An auto-exposure feedback gain above 10 may cause the system to overshoot when a marker moves abruptly, degrading signal quality and position accuracy.
+
 ---
 
 #Input from Gemini
@@ -86,6 +95,8 @@ Target Flashing Sequence (TFS) Memory: When programming the flashing sequence, t
 
 Analog Synchronization Rate Limitations: When syncing analog data (like force plates) via EOF pulse, the chosen analog frame rate must be divisible by the internal binary divider of the DAQ device's crystal (e.g., a 4MHz crystal cannot easily sync with 150 FPS).
 
+Tetherless Interference: In tetherless mode, radio noise can disrupt operation. If interference occurs, the LED_ID and TCM_ID data may become scrambled (though coordinates may remain accurate), ruining the frame data.
+
 ⚠️ Warnings (Performance & Operational Constraints)
 
 Frequency vs. Exposure Tradeoff: The maximum possible sampling frequency is strictly limited by the Sample Operation Time (SOT) you set. For example, setting SOT to 2 allows up to 13,020 Hz, but restricts max exposure time to 64.8 µs. Setting SOT to 15 allows up to 397.6 µs of exposure, but drops the maximum frequency to 2,441 Hz. Eye exposure time can never exceed the set SOT.
@@ -114,6 +125,10 @@ Multi-Tracker Signal Bounce: When chaining 4 to 8 trackers together, a 75 ohm te
 
 
 VZDaq Signal Range: When configuring analog channels, setting an input range that is too small for the signal will cut off the data, while using a range that is too large for a small signal will degrade the resolution of the graph.
+
+Double Sampling Penalty: If "Double Sampling" (background subtraction) is enabled to handle ambient light, the required SOT doubles. This reduces the maximum sampling rate accordingly.
+
+Auto-Exposure Gain Overshoot: Setting the Auto-Exposure feedback gain too high may cause the system to overshoot when a marker moves abruptly, resulting in signal strength that is worse for position computation.
 
 #Input from ChatGPT
 Below is a consolidated list of operational limitations I can extract from your PTI/Visualeyez documentation, grouped and tagged as [ERROR] (will break/invalid/undefined behavior, or data not produced correctly) vs [WARNING] (operation continues but with risk of bad data, missed samples, hardware risk, or user-action constraints).

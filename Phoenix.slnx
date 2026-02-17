@@ -9,7 +9,7 @@
   <Folder Name="/Doc/">
     <File Path="Doc/Cheat sheet.md" />
     <File Path="Doc/configdetect.md" />
-    <File Path="Doc/MeasureFailure.md" />
+    <File Path="Doc/MeasureFailureAdditional.md" />
     <File Path="Doc/OnlineUserManual.pdf" />
     <File Path="Doc/PTI LOW LEVEL CONTROL KIT FEB 2022 - CONFIDENTIAL.PDF" />
     <File Path="Doc/QuickStartGuide.pdf" />
@@ -20,4 +20,5 @@
   </Folder>
   <Project Path="D:/Phoenix/ConvertToJson/ConvertToJson.vcxproj" Id="b2e391d7-f46f-4024-9186-3f401a7936ea" />
   <Project Path="D:/Phoenix/Detect/Detect.vcxproj" Id="3773cfea-f443-4cc0-8a29-804976c74bda" />
+  <Project Path="D:/Phoenix/Tests/Tests.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
 </Solution>

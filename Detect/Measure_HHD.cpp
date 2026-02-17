@@ -276,7 +276,10 @@ struct HHD_MeasurementSession
 std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
     int frequencyHz,
     const std::vector<HHD_MarkerEntry> &markers,
-    int sot)
+    int sot,
+    bool doubleSampling,
+    bool tetherless,
+    int exposureGain)
 {
     std::vector<HHD_ValidationIssue> issues;
 
@@ -433,7 +436,8 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
 
     if (sot >= 2 && sot <= 15 && totalFlashes > 0 && frequencyHz >= 1)
     {
-        double maxTargetHz = 26040.0 / sot;
+        int effectiveSot = doubleSampling ? sot * 2 : sot;
+        double maxTargetHz = 26040.0 / effectiveSot;
         double maxFps      = maxTargetHz / totalFlashes;
 
         if (frequencyHz > static_cast<int>(maxFps))
@@ -467,6 +471,25 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(
                        " is high. Increased LED duty cycle raises heat load.");
         }
     }
+
+    // --- Double sampling penalty ---
+
+    if (doubleSampling)
+        addWarning("Double Sampling is enabled — effective SOT is doubled, "
+                   "reducing the maximum sampling rate by half.");
+
+    // --- Tetherless interference risk ---
+
+    if (tetherless)
+        addWarning("Tetherless mode active. Radio interference may scramble "
+                   "LED_ID and TCM_ID data, ruining frame identification.");
+
+    // --- Auto-exposure gain too high ---
+
+    if (exposureGain > 10)
+        addWarning("Exposure gain " + std::to_string(exposureGain) +
+                   " is high. Auto-exposure may overshoot on abrupt marker "
+                   "movement, degrading position accuracy.");
 
     return issues;
 }
