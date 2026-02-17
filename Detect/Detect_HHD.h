@@ -22,7 +22,7 @@ struct HHD_DetectionResult
     DWORD             configSize;
     std::vector<BYTE> configData;
     std::string       portName;
-    std::string       serialNumber; // 8-byte tracker serial number from Initial Message (hex)
+    std::string       serialNumber; // 8-byte tracker serial number from Initial Message (decimal)
 };
 
 // Performs the HHD Software detection sequence on the specified COM port.

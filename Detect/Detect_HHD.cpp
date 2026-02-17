@@ -1,4 +1,5 @@
 #include "Detect_HHD.h"
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -211,10 +212,12 @@ namespace
                 continue;
 
             // Valid Initial Message found — extract serial number (bytes 5-12)
-            serialNumber.clear();
-            for (int j = 0; j < INIT_SERIAL_LENGTH; j++)
+            // 8 bytes, big-endian unsigned integer, displayed as decimal
             {
-                serialNumber += static_cast<char>(buffer[i + INIT_SERIAL_OFFSET + j]);
+                uint64_t sn = 0;
+                for (int j = 0; j < INIT_SERIAL_LENGTH; j++)
+                    sn = (sn << 8) | buffer[i + INIT_SERIAL_OFFSET + j];
+                serialNumber = std::to_string(sn);
             }
 
             std::cout << "  [HHD] Initial Message received — Serial Number: " << serialNumber << std::endl;

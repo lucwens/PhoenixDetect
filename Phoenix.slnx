@@ -3,6 +3,9 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/Data/">
+    <File Path="Data/detect_start_stop.json" />
+  </Folder>
   <Folder Name="/Doc/">
     <File Path="Doc/Cheat sheet.md" />
     <File Path="Doc/MeasureFailure.md" />

@@ -57,23 +57,110 @@ std::string BytesToString(const std::vector<unsigned char> &bytes)
     return str;
 }
 
+// Saved detection info for a single tracker
+struct DetectedTracker
+{
+    std::string portName;
+    DWORD       baudRate;
+    std::string serialNumber;
+};
+
+// Save all detected trackers to Settings/Detect.json
+void SaveDetectionSettings(const std::vector<DetectedTracker> &trackers)
+{
+    CreateDirectoryA("Settings", NULL);
+    std::ofstream ofs("Settings/Detect.json");
+    if (!ofs.is_open())
+        return;
+
+    ofs << "[\n";
+    for (size_t i = 0; i < trackers.size(); i++)
+    {
+        const auto &t = trackers[i];
+        ofs << "  {\n";
+        ofs << "    \"portName\": \"" << t.portName << "\",\n";
+        ofs << "    \"baudRate\": " << t.baudRate << ",\n";
+        ofs << "    \"serialNumber\": \"" << t.serialNumber << "\"\n";
+        ofs << "  }";
+        if (i + 1 < trackers.size())
+            ofs << ",";
+        ofs << "\n";
+    }
+    ofs << "]\n";
+    ofs.close();
+    std::cout << "Detection settings saved to Settings/Detect.json (" << trackers.size() << " tracker(s))" << std::endl;
+}
+
+// Load detected trackers from Settings/Detect.json
+// Returns true if at least one valid tracker was loaded.
+bool LoadDetectionSettings(std::vector<DetectedTracker> &trackers)
+{
+    trackers.clear();
+    std::ifstream ifs("Settings/Detect.json");
+    if (!ifs.is_open())
+        return false;
+
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+
+    // Helper lambdas to extract values starting from a given position
+    auto extractString = [&](const std::string &key, size_t startPos) -> std::string
+    {
+        std::string search = "\"" + key + "\": \"";
+        size_t      pos    = content.find(search, startPos);
+        if (pos == std::string::npos)
+            return "";
+        pos += search.size();
+        size_t end = content.find('"', pos);
+        if (end == std::string::npos)
+            return "";
+        return content.substr(pos, end - pos);
+    };
+
+    auto extractNumber = [&](const std::string &key, size_t startPos) -> DWORD
+    {
+        std::string search = "\"" + key + "\": ";
+        size_t      pos    = content.find(search, startPos);
+        if (pos == std::string::npos)
+            return 0;
+        pos += search.size();
+        return static_cast<DWORD>(std::stoul(content.substr(pos)));
+    };
+
+    // Parse each object block delimited by '{' ... '}'
+    size_t pos = 0;
+    while ((pos = content.find('{', pos)) != std::string::npos)
+    {
+        size_t blockEnd = content.find('}', pos);
+        if (blockEnd == std::string::npos)
+            break;
+
+        DetectedTracker t;
+        t.portName     = extractString("portName", pos);
+        t.baudRate     = extractNumber("baudRate", pos);
+        t.serialNumber = extractString("serialNumber", pos);
+
+        if (!t.portName.empty() && t.baudRate > 0)
+            trackers.push_back(t);
+
+        pos = blockEnd + 1;
+    }
+
+    return !trackers.empty();
+}
+
 std::string GenerateLogFilename()
 {
-    auto  now  = std::chrono::system_clock::now();
-    auto  time = std::chrono::system_clock::to_time_t(now);
+    auto      now  = std::chrono::system_clock::now();
+    auto      time = std::chrono::system_clock::to_time_t(now);
     struct tm tm;
     localtime_s(&tm, &time);
 
     CreateDirectoryA("Output", NULL);
 
     std::ostringstream ss;
-    ss << "Output/Measure_"
-       << std::setfill('0') << std::setw(4) << (tm.tm_year + 1900)
-       << std::setw(2) << (tm.tm_mon + 1)
-       << std::setw(2) << tm.tm_mday << "_"
-       << std::setw(2) << tm.tm_hour
-       << std::setw(2) << tm.tm_min
-       << ".ndjson";
+    ss << "Output/Measure_" << std::setfill('0') << std::setw(4) << (tm.tm_year + 1900) << std::setw(2) << (tm.tm_mon + 1) << std::setw(2) << tm.tm_mday << "_"
+       << std::setw(2) << tm.tm_hour << std::setw(2) << tm.tm_min << ".ndjson";
     return ss.str();
 }
 
@@ -82,22 +169,17 @@ void WriteFrameNdjson(std::ofstream &logFile, const std::vector<HHD_MeasurementS
     if (frameSamples.empty() || !logFile.is_open())
         return;
 
-    logFile << "{\"frame\":{\"timestamp_us\":" << frameSamples[0].timestamp_us
-            << ",\"markerCount\":" << frameSamples.size()
-            << ",\"triggerIndex\":" << (int)frameSamples[0].triggerIndex
-            << "},\"markers\":[";
+    logFile << "{\"frame\":{\"timestamp_us\":" << frameSamples[0].timestamp_us << ",\"markerCount\":" << frameSamples.size()
+            << ",\"triggerIndex\":" << (int)frameSamples[0].triggerIndex << "},\"markers\":[";
 
     for (size_t i = 0; i < frameSamples.size(); i++)
     {
         const auto &s = frameSamples[i];
         if (i > 0)
             logFile << ",";
-        logFile << std::fixed << std::setprecision(2)
-                << "{\"tcmId\":" << (int)s.tcmId
-                << ",\"ledId\":" << (int)s.ledId
-                << ",\"position\":{\"x\":" << s.x_mm << ",\"y\":" << s.y_mm << ",\"z\":" << s.z_mm << "}"
-                << ",\"quality\":{\"ambientLight\":" << (int)s.ambientLight
-                << ",\"coordStatus\":" << (int)s.coordStatus
+        logFile << std::fixed << std::setprecision(2) << "{\"tcmId\":" << (int)s.tcmId << ",\"ledId\":" << (int)s.ledId << ",\"position\":{\"x\":" << s.x_mm
+                << ",\"y\":" << s.y_mm << ",\"z\":" << s.z_mm << "}"
+                << ",\"quality\":{\"ambientLight\":" << (int)s.ambientLight << ",\"coordStatus\":" << (int)s.coordStatus
                 << ",\"rightEye\":{\"signal\":" << (int)s.rightEyeSignal << ",\"status\":" << (int)s.rightEyeStatus << "}"
                 << ",\"centerEye\":{\"signal\":" << (int)s.centerEyeSignal << ",\"status\":" << (int)s.centerEyeStatus << "}"
                 << ",\"leftEye\":{\"signal\":" << (int)s.leftEyeSignal << ",\"status\":" << (int)s.leftEyeStatus << "}"
@@ -380,23 +462,47 @@ int main(int argc, char *argv[])
         return convertDirectory(argv[1]);
     }
 
+    HANDLE                       hPort   = INVALID_HANDLE_VALUE;
+    HHD_MeasurementSession      *session = nullptr;
+    std::vector<DetectedTracker> detectedTrackers;
+
+    // Load saved detection settings from previous session
+    if (LoadDetectionSettings(detectedTrackers))
+    {
+        std::cout << "Loaded saved detection settings (" << detectedTrackers.size() << " tracker(s)):" << std::endl;
+        for (size_t i = 0; i < detectedTrackers.size(); i++)
+        {
+            const auto &t = detectedTrackers[i];
+            std::cout << "  [" << (i + 1) << "] " << t.portName << "  Baud: " << t.baudRate;
+            if (!t.serialNumber.empty())
+                std::cout << "  Serial: " << t.serialNumber;
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
     std::cout << "VisualEyez Tracker Interactive Console" << std::endl;
     std::cout << "==========================================" << std::endl;
     std::cout << "  h - Detect HHD on COM1-COM16" << std::endl;
-    std::cout << "  s - Start measurement (10 Hz, auto-stops after 10s)" << std::endl;
+    std::cout << "  s - Start measurement (10 Hz, auto-stops after " << (MEASURE_DURATION_MS / 1000) << "s)" << std::endl;
     std::cout << "  t - Stop measurement" << std::endl;
     std::cout << "  q - Quit" << std::endl;
+    if (!detectedTrackers.empty())
+    {
+        std::cout << "  [Ready: " << detectedTrackers.size() << " tracker(s) — ";
+        for (size_t i = 0; i < detectedTrackers.size(); i++)
+        {
+            if (i > 0)
+                std::cout << ", ";
+            std::cout << detectedTrackers[i].portName;
+        }
+        std::cout << "]" << std::endl;
+    }
     std::cout << std::endl;
-
-    HANDLE                  hPort   = INVALID_HANDLE_VALUE;
-    HHD_MeasurementSession *session = nullptr;
-    std::string             detectedPort;
-    DWORD                   detectedBaud   = 0;
-    std::string             detectedSerial;
-    ULONGLONG               measureStartTick = 0;
-    const DWORD             MEASURE_DURATION_MS = 10000; // auto-stop after 10 seconds
-    std::ofstream                          logFile;
-    std::vector<HHD_MeasurementSample>     frameBuffer;
+    ULONGLONG                          measureStartTick    = 0;
+    const DWORD                        MEASURE_DURATION_MS = 3000;
+    std::ofstream                      logFile;
+    std::vector<HHD_MeasurementSample> frameBuffer;
 
     while (true)
     {
@@ -409,6 +515,7 @@ int main(int argc, char *argv[])
             if (ch == 'h' || ch == 'H')
             {
                 std::cout << "\n--- Scanning COM1-COM16 for HHD devices ---" << std::endl;
+                detectedTrackers.clear();
                 for (int i = 1; i <= 16; ++i)
                 {
                     std::string portName = "COM" + std::to_string(i);
@@ -426,12 +533,12 @@ int main(int argc, char *argv[])
                         if (!result.serialNumber.empty())
                             std::cout << "  Serial: " << result.serialNumber;
                         std::cout << "  Baud: " << result.detectedBaudRate << std::endl;
-                        detectedPort   = result.portName;
-                        detectedBaud   = result.detectedBaudRate;
-                        detectedSerial = result.serialNumber;
+                        detectedTrackers.push_back({result.portName, result.detectedBaudRate, result.serialNumber});
                     }
                 }
-                std::cout << "--- Scan complete ---\n" << std::endl;
+                if (!detectedTrackers.empty())
+                    SaveDetectionSettings(detectedTrackers);
+                std::cout << "--- Scan complete: " << detectedTrackers.size() << " tracker(s) found ---\n" << std::endl;
             }
 
             // 's' — start measurement
@@ -442,18 +549,19 @@ int main(int argc, char *argv[])
                     std::cout << "Measurement already running. Press 't' to stop first." << std::endl;
                     continue;
                 }
-                if (detectedPort.empty())
+                if (detectedTrackers.empty())
                 {
                     std::cout << "No device detected yet. Press 'h' to scan first." << std::endl;
                     continue;
                 }
 
-                // Open the detected port
-                std::string portPath = "\\\\.\\" + detectedPort;
+                // Use the first detected tracker
+                const auto &tracker  = detectedTrackers[0];
+                std::string portPath = "\\\\.\\" + tracker.portName;
                 hPort                = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
                 if (hPort == INVALID_HANDLE_VALUE)
                 {
-                    std::cout << "Failed to open " << detectedPort << std::endl;
+                    std::cout << "Failed to open " << tracker.portName << std::endl;
                     continue;
                 }
 
@@ -461,7 +569,7 @@ int main(int argc, char *argv[])
                 DCB dcb       = {};
                 dcb.DCBlength = sizeof(dcb);
                 GetCommState(hPort, &dcb);
-                dcb.BaudRate          = detectedBaud;
+                dcb.BaudRate          = tracker.baudRate;
                 dcb.ByteSize          = 8;
                 dcb.StopBits          = ONESTOPBIT;
                 dcb.Parity            = NOPARITY;
@@ -470,7 +578,7 @@ int main(int argc, char *argv[])
                 dcb.fOutxDsrFlow      = TRUE;
                 dcb.fDsrSensitivity   = TRUE;
                 dcb.fTXContinueOnXoff = TRUE;
-                dcb.XonLim            = (detectedBaud == 2000000) ? 22 : 82;
+                dcb.XonLim            = (tracker.baudRate == 2000000) ? 22 : 82;
                 dcb.XoffLim           = 0;
                 SetCommState(hPort, &dcb);
 
@@ -484,18 +592,18 @@ int main(int argc, char *argv[])
                     for (uint8_t led = 1; led <= 3; ++led)
                         markers.push_back({tcm, led, 1});
 
-                std::cout << "Starting measurement on " << detectedPort << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
+                std::cout << "Starting measurement on " << tracker.portName << " at 10 Hz (" << markers.size() << " markers)..." << std::endl;
 
                 session = StartMeasurement(hPort, 10, markers);
                 if (session)
                 {
-                    measureStartTick = GetTickCount64();
+                    measureStartTick        = GetTickCount64();
                     std::string logFilename = GenerateLogFilename();
                     logFile.open(logFilename, std::ios::out | std::ios::trunc);
                     if (logFile.is_open())
                         std::cout << "Logging to " << logFilename << std::endl;
                     frameBuffer.clear();
-                    std::cout << "Measurement started (will auto-stop in 10s)." << std::endl;
+                    std::cout << "Measurement started (will auto-stop in " << (MEASURE_DURATION_MS / 1000) << "s)." << std::endl;
                 }
                 else
                 {
@@ -546,28 +654,14 @@ int main(int argc, char *argv[])
                     hPort = INVALID_HANDLE_VALUE;
                 }
 
-                // Save detection settings to ./Settings/Detect.json
-                CreateDirectoryA("Settings", NULL);
-                std::ofstream ofs("Settings/Detect.json");
-                if (ofs.is_open())
-                {
-                    ofs << "{\n";
-                    ofs << "  \"portName\": \"" << detectedPort << "\",\n";
-                    ofs << "  \"baudRate\": " << detectedBaud << ",\n";
-                    ofs << "  \"serialNumber\": \"" << detectedSerial << "\"\n";
-                    ofs << "}\n";
-                    ofs.close();
-                    std::cout << "Settings saved to Settings/Detect.json" << std::endl;
-                }
-
                 break;
             }
         }
 
-        // --- Auto-stop after 10 seconds ---
+        // --- Auto-stop after MEASURE_DURATION_MS ---
         if (session && (GetTickCount64() - measureStartTick) >= MEASURE_DURATION_MS)
         {
-            std::cout << "\n10 seconds elapsed — stopping measurement automatically." << std::endl;
+            std::cout << "\n" << (MEASURE_DURATION_MS / 1000) << " seconds elapsed — stopping measurement automatically." << std::endl;
             WriteFrameNdjson(logFile, frameBuffer);
             frameBuffer.clear();
             if (logFile.is_open())
@@ -591,8 +685,8 @@ int main(int argc, char *argv[])
             {
                 std::cout << "t=" << std::setw(10) << s.timestamp_us << " TCM" << (int)s.tcmId << " LED" << std::setw(2) << (int)s.ledId << std::fixed
                           << std::setprecision(2) << " x=" << std::setw(9) << s.x_mm << " y=" << std::setw(9) << s.y_mm << " z=" << std::setw(9) << s.z_mm
-                          << "  amb=" << (int)s.ambientLight << " R:" << (int)s.rightEyeStatus << " C:" << (int)s.centerEyeStatus << " L:" << (int)s.leftEyeStatus
-                          << (s.endOfFrame ? " EOF" : "") << std::endl;
+                          << "  amb=" << (int)s.ambientLight << " R:" << (int)s.rightEyeStatus << " C:" << (int)s.centerEyeStatus
+                          << " L:" << (int)s.leftEyeStatus << (s.endOfFrame ? " EOF" : "") << std::endl;
 
                 frameBuffer.push_back(s);
                 if (s.endOfFrame)
