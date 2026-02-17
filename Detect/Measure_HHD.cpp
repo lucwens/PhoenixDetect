@@ -486,17 +486,23 @@ std::vector<HHD_ValidationIssue> ValidateMeasurementSetup(int frequencyHz, const
 
 HHD_MeasurementSession *StartMeasurement(HANDLE hPort, int frequencyHz, const std::vector<HHD_MarkerEntry> &markers, int resetTimeoutMs)
 {
-    if (markers.empty())
+    // Validate setup before starting — abort on errors, log warnings
+    auto issues = ValidateMeasurementSetup(frequencyHz, markers);
+    bool hasErrors = false;
+    for (const auto &issue : issues)
     {
-        std::cerr << "[Measure] No markers specified" << std::endl;
-        return nullptr;
+        if (issue.severity == HHD_IssueSeverity::Error)
+        {
+            std::cerr << "[Measure] ERROR: " << issue.message << std::endl;
+            hasErrors = true;
+        }
+        else
+        {
+            std::cout << "[Measure] WARNING: " << issue.message << std::endl;
+        }
     }
-
-    // Clamp frequency to valid range
-    if (frequencyHz < 1)
-        frequencyHz = 1;
-    if (frequencyHz > 4600)
-        frequencyHz = 4600;
+    if (hasErrors)
+        return nullptr;
 
     // Count total samples per frame (sum of all flash counts)
     uint32_t totalFlashes = 0;
