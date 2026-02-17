@@ -22,9 +22,23 @@ struct HHD_MeasurementSample
     double   x_mm;         // X coordinate in millimeters (bytes 5-7, signed 24-bit / 100)
     double   y_mm;         // Y coordinate in millimeters (bytes 8-10)
     double   z_mm;         // Z coordinate in millimeters (bytes 11-13)
-    uint32_t status;       // status word — signal quality flags (bytes 14-17)
+    uint32_t status;       // raw status word (bytes 14-17)
     uint8_t  ledId;        // LED marker ID, 1-64 (byte 18, bits 6-0)
     uint8_t  tcmId;        // TCM module ID, 1-8  (byte 19, bits 3-0)
+
+    // Decoded status fields (status word bytes 14-17)
+    // Byte 14: E|HHH|mmmm   Byte 15: ???|La|AAAA
+    // Byte 16: TTT|Lb|BBBB  Byte 17: TTT|Lc|CCCC
+    bool    endOfFrame;       // E bit: last sample in frame
+    uint8_t coordStatus;      // HHH: 0 = no error
+    uint8_t ambientLight;     // mmmm: max ambient light level (0-15)
+    uint8_t triggerIndex;     // 6-bit trigger index (TTT:TTT from bytes 16-17)
+    uint8_t rightEyeSignal;   // La: 1 = signal low
+    uint8_t rightEyeStatus;   // AAAA: 0 = no anomaly
+    uint8_t centerEyeSignal;  // Lb: 1 = signal low
+    uint8_t centerEyeStatus;  // BBBB: 0 = no anomaly
+    uint8_t leftEyeSignal;    // Lc: 1 = signal low
+    uint8_t leftEyeStatus;    // CCCC: 0 = no anomaly
 };
 
 // Opaque handle for an active measurement session.

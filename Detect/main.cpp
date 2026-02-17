@@ -14,6 +14,8 @@
 #include <conio.h>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
+#include <ctime>
 
 // VisualEyez Configuration
 // Based on logs: 2,500,000 baud, 8 data bits, 1 stop bit, No parity.
@@ -53,6 +55,55 @@ std::string BytesToString(const std::vector<unsigned char> &bytes)
         }
     }
     return str;
+}
+
+std::string GenerateLogFilename()
+{
+    auto  now  = std::chrono::system_clock::now();
+    auto  time = std::chrono::system_clock::to_time_t(now);
+    struct tm tm;
+    localtime_s(&tm, &time);
+
+    std::ostringstream ss;
+    ss << "Measure_"
+       << std::setfill('0') << std::setw(4) << (tm.tm_year + 1900)
+       << std::setw(2) << (tm.tm_mon + 1)
+       << std::setw(2) << tm.tm_mday << "_"
+       << std::setw(2) << tm.tm_hour
+       << std::setw(2) << tm.tm_min
+       << ".ndjson";
+    return ss.str();
+}
+
+void WriteFrameNdjson(std::ofstream &logFile, const std::vector<HHD_MeasurementSample> &frameSamples)
+{
+    if (frameSamples.empty() || !logFile.is_open())
+        return;
+
+    logFile << "{\"frame\":{\"timestamp_us\":" << frameSamples[0].timestamp_us
+            << ",\"markerCount\":" << frameSamples.size()
+            << ",\"triggerIndex\":" << (int)frameSamples[0].triggerIndex
+            << "},\"markers\":[";
+
+    for (size_t i = 0; i < frameSamples.size(); i++)
+    {
+        const auto &s = frameSamples[i];
+        if (i > 0)
+            logFile << ",";
+        logFile << std::fixed << std::setprecision(2)
+                << "{\"tcmId\":" << (int)s.tcmId
+                << ",\"ledId\":" << (int)s.ledId
+                << ",\"position\":{\"x\":" << s.x_mm << ",\"y\":" << s.y_mm << ",\"z\":" << s.z_mm << "}"
+                << ",\"quality\":{\"ambientLight\":" << (int)s.ambientLight
+                << ",\"coordStatus\":" << (int)s.coordStatus
+                << ",\"rightEye\":{\"signal\":" << (int)s.rightEyeSignal << ",\"status\":" << (int)s.rightEyeStatus << "}"
+                << ",\"centerEye\":{\"signal\":" << (int)s.centerEyeSignal << ",\"status\":" << (int)s.centerEyeStatus << "}"
+                << ",\"leftEye\":{\"signal\":" << (int)s.leftEyeSignal << ",\"status\":" << (int)s.leftEyeStatus << "}"
+                << "}}";
+    }
+
+    logFile << "]}\n";
+    logFile.flush();
 }
 
 HANDLE CheckPort(int portNum)
@@ -342,6 +393,8 @@ int main(int argc, char *argv[])
     std::string             detectedSerial;
     ULONGLONG               measureStartTick = 0;
     const DWORD             MEASURE_DURATION_MS = 10000; // auto-stop after 10 seconds
+    std::ofstream                          logFile;
+    std::vector<HHD_MeasurementSample>     frameBuffer;
 
     while (true)
     {
@@ -435,6 +488,11 @@ int main(int argc, char *argv[])
                 if (session)
                 {
                     measureStartTick = GetTickCount64();
+                    std::string logFilename = GenerateLogFilename();
+                    logFile.open(logFilename, std::ios::out | std::ios::trunc);
+                    if (logFile.is_open())
+                        std::cout << "Logging to " << logFilename << std::endl;
+                    frameBuffer.clear();
                     std::cout << "Measurement started (will auto-stop in 10s)." << std::endl;
                 }
                 else
@@ -454,6 +512,10 @@ int main(int argc, char *argv[])
                     continue;
                 }
                 std::cout << "Stopping measurement..." << std::endl;
+                WriteFrameNdjson(logFile, frameBuffer);
+                frameBuffer.clear();
+                if (logFile.is_open())
+                    logFile.close();
                 StopMeasurement(session);
                 session = nullptr;
                 if (hPort != INVALID_HANDLE_VALUE)
@@ -469,6 +531,10 @@ int main(int argc, char *argv[])
             {
                 if (session)
                 {
+                    WriteFrameNdjson(logFile, frameBuffer);
+                    frameBuffer.clear();
+                    if (logFile.is_open())
+                        logFile.close();
                     StopMeasurement(session);
                     session = nullptr;
                 }
@@ -500,6 +566,10 @@ int main(int argc, char *argv[])
         if (session && (GetTickCount64() - measureStartTick) >= MEASURE_DURATION_MS)
         {
             std::cout << "\n10 seconds elapsed — stopping measurement automatically." << std::endl;
+            WriteFrameNdjson(logFile, frameBuffer);
+            frameBuffer.clear();
+            if (logFile.is_open())
+                logFile.close();
             StopMeasurement(session);
             session = nullptr;
             if (hPort != INVALID_HANDLE_VALUE)
@@ -519,7 +589,15 @@ int main(int argc, char *argv[])
             {
                 std::cout << "t=" << std::setw(10) << s.timestamp_us << " TCM" << (int)s.tcmId << " LED" << std::setw(2) << (int)s.ledId << std::fixed
                           << std::setprecision(2) << " x=" << std::setw(9) << s.x_mm << " y=" << std::setw(9) << s.y_mm << " z=" << std::setw(9) << s.z_mm
-                          << std::endl;
+                          << "  amb=" << (int)s.ambientLight << " R:" << (int)s.rightEyeStatus << " C:" << (int)s.centerEyeStatus << " L:" << (int)s.leftEyeStatus
+                          << (s.endOfFrame ? " EOF" : "") << std::endl;
+
+                frameBuffer.push_back(s);
+                if (s.endOfFrame)
+                {
+                    WriteFrameNdjson(logFile, frameBuffer);
+                    frameBuffer.clear();
+                }
             }
         }
 

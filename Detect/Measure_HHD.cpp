@@ -147,6 +147,32 @@ namespace
         s.status                = DecodeBE32(&rec[13]);               // bytes 14-17
         s.ledId                 = rec[17] & 0x7F;                     // byte 18, bits 6-0
         s.tcmId                 = rec[18] & 0x0F;                     // byte 19, bits 3-0
+
+        // Decode status word fields (bytes 14-17, 0-indexed: rec[13]-rec[16])
+        // Byte 14: E|HHH|mmmm
+        uint8_t b14        = rec[13];
+        s.endOfFrame       = (b14 >> 7) & 1;
+        s.coordStatus      = (b14 >> 4) & 0x07;
+        s.ambientLight     = b14 & 0x0F;
+
+        // Byte 15: ???|La|AAAA (right eye)
+        uint8_t b15        = rec[14];
+        s.rightEyeSignal   = (b15 >> 4) & 0x01;
+        s.rightEyeStatus   = b15 & 0x0F;
+
+        // Byte 16: TTT|Lb|BBBB (center eye + trigger high bits)
+        uint8_t b16        = rec[15];
+        s.centerEyeSignal  = (b16 >> 4) & 0x01;
+        s.centerEyeStatus  = b16 & 0x0F;
+
+        // Byte 17: TTT|Lc|CCCC (left eye + trigger low bits)
+        uint8_t b17        = rec[16];
+        s.leftEyeSignal    = (b17 >> 4) & 0x01;
+        s.leftEyeStatus    = b17 & 0x0F;
+
+        // Trigger index: upper 3 bits of byte 16 + upper 3 bits of byte 17
+        s.triggerIndex     = ((b16 >> 5) & 0x07) << 3 | ((b17 >> 5) & 0x07);
+
         return s;
     }
 
