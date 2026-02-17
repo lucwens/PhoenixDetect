@@ -64,8 +64,10 @@ std::string GenerateLogFilename()
     struct tm tm;
     localtime_s(&tm, &time);
 
+    CreateDirectoryA("Output", NULL);
+
     std::ostringstream ss;
-    ss << "Measure_"
+    ss << "Output/Measure_"
        << std::setfill('0') << std::setw(4) << (tm.tm_year + 1900)
        << std::setw(2) << (tm.tm_mon + 1)
        << std::setw(2) << tm.tm_mday << "_"

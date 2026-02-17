@@ -103,6 +103,8 @@ The `Doc/` folder contains protocol analysis, architecture notes, and vendor man
 | `convertDirectory(dirPath)` | Recursively finds all `.dmslog8` files in a directory and batch-converts them. |
 | `BytesToHex(bytes)` | Formats a byte vector as a continuous hex string. |
 | `BytesToString(bytes)` | Formats a byte vector as printable ASCII (non-printable bytes become `.`). |
+| `GenerateLogFilename()` | Returns `Output/Measure_YYYYMMDD_HHMM.ndjson` based on the current system time. |
+| `WriteFrameNdjson(logFile, frameSamples)` | Writes one NDJSON line per frame: `frame` group + `markers` array with position and quality per marker. |
 
 ### Detection internals (Detect_HHD.cpp, anonymous namespace)
 
@@ -259,9 +261,50 @@ Each 19-byte data record decodes to:
 | 5–7 | X coordinate | Big-endian signed 24-bit, ÷100 → mm |
 | 8–10 | Y coordinate | Big-endian signed 24-bit, ÷100 → mm |
 | 11–13 | Z coordinate | Big-endian signed 24-bit, ÷100 → mm |
-| 14–17 | Status word | Signal quality flags, eye status, trigger index |
+| 14–17 | Status word | See decoded fields below |
 | 18 | LED ID | Bits 6–0 (1–64) |
 | 19 | TCM ID | Bits 3–0 (1–8) |
+
+The status word (bytes 14–17) is decoded into per-lens signal quality:
+
+| Byte | Bits | Field | Description |
+|---|---|---|---|
+| 14 | `E\|HHH\|mmmm` | endOfFrame, coordStatus, ambientLight | Frame boundary, coord error (0=OK), ambient light (0–15) |
+| 15 | `???\|La\|AAAA` | rightEyeSignal, rightEyeStatus | Right lens: signal low flag + status (0=no anomaly) |
+| 16 | `TTT\|Lb\|BBBB` | triggerIndex(hi), centerEyeSignal, centerEyeStatus | Center lens + trigger index high 3 bits |
+| 17 | `TTT\|Lc\|CCCC` | triggerIndex(lo), leftEyeSignal, leftEyeStatus | Left lens + trigger index low 3 bits |
+
+#### NDJSON frame logging
+
+During measurement, each complete frame (ending with `endOfFrame=true`) is written as one line to an NDJSON file in `./Output/`. The filename is generated from the current date/time: `Measure_YYYYMMDD_HHMM.ndjson`.
+
+Each line contains:
+
+```json
+{
+  "frame": { "timestamp_us": 30079432, "markerCount": 6, "triggerIndex": 1 },
+  "markers": [
+    {
+      "tcmId": 1, "ledId": 1,
+      "position": { "x": -0.01, "y": 16770.56, "z": -0.01 },
+      "quality": {
+        "ambientLight": 3, "coordStatus": 0,
+        "rightEye":  { "signal": 0, "status": 6 },
+        "centerEye": { "signal": 0, "status": 4 },
+        "leftEye":   { "signal": 0, "status": 0 }
+      }
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `frame.timestamp_us` | Timestamp of the first marker in the frame (μs since boot) |
+| `frame.markerCount` | Number of markers in this frame |
+| `frame.triggerIndex` | 6-bit trigger index from the status word |
+| `markers[].position` | X/Y/Z coordinates in millimeters |
+| `markers[].quality` | Per-lens signal quality: ambient light, coord status, and right/center/left eye signal + status |
 
 #### Stop (`StopMeasurement`)
 
