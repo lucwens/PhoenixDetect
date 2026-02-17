@@ -703,15 +703,15 @@ HHD_ConfigDetectResult ConfigDetect(HANDLE hPort, const HHD_ConfigDetectOptions 
                 if (s.coordStatus == 0)
                     st.framesCoordOk++;
 
-                bool allEyesLow = (s.rightEyeSignal == 1) &&
-                                  (s.centerEyeSignal == 1) &&
-                                  (s.leftEyeSignal == 1);
-                if (allEyesLow)
+                bool allEyesOk = (s.rightEyeStatus == 0) &&
+                                 (s.centerEyeStatus == 0) &&
+                                 (s.leftEyeStatus == 0);
+                if (!allEyesOk)
                     st.framesAllLow++;
 
-                // A sample is "valid" only if coordinates are OK AND
-                // at least one camera eye actually saw the marker.
-                if (s.coordStatus == 0 && !allEyesLow)
+                // A sample is "valid" only if all three eye statuses are 0
+                // (no anomaly on any lens).
+                if (allEyesOk)
                     st.framesValid++;
             }
             Sleep(5);
